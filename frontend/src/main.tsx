@@ -30,7 +30,7 @@ type FormState = {
   priorityProjects: string;
 };
 
-const initialForm: FormState = {
+const emptyForm: FormState = {
   legalLastName: '',
   firstNames: '',
   dateOfBirth: '',
@@ -55,6 +55,33 @@ const initialForm: FormState = {
   weight: '',
   availability: '',
   priorityProjects: '',
+};
+
+const demoForm: FormState = {
+  legalLastName: 'KOUASSI TEST',
+  firstNames: 'Amina',
+  dateOfBirth: '1988-04-12',
+  placeOfBirth: 'Lomé, Togo',
+  maritalStatus: 'marié',
+  dependents: '2',
+  arrivalInCanada: '2021-09-15',
+  phone: '5145550198',
+  email: 'amina.test@example.com',
+  address: '245 Rue Saint-Denis, Montréal',
+  postalCode: 'H2X 3K8',
+  occupation: "Je suis PAB à l'hôpital CIUSSS du Nord de Montréal",
+  employerAddress: '1200 Boulevard René-Lévesque, Montréal, H3B 4W8',
+  annualIncome: '48 000$',
+  totalAssets: '18 000$',
+  totalDebts: '9 500$',
+  hasExistingInsurance: 'non',
+  existingInsuranceDetails: '',
+  noInsuranceReason: "Je n'ai jamais pris le temps de comparer les options.",
+  acceptableBudget: '150$ par mois',
+  height: '1m68',
+  weight: '72 kg',
+  availability: 'Soirs après 18h ou samedi matin via Zoom',
+  priorityProjects: "Protection familiale, épargne pour les enfants, maladies graves et préparation achat maison.",
 };
 
 const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
@@ -147,7 +174,8 @@ function payloadFromForm(form: FormState) {
 }
 
 function App() {
-  const [form, setForm] = useState<FormState>(initialForm);
+  const isDemo = new URLSearchParams(window.location.search).get('demo') === '1';
+  const [form, setForm] = useState<FormState>(isDemo ? demoForm : emptyForm);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -167,7 +195,7 @@ function App() {
       });
       setSubmitted(true);
       setMessage('Merci. Vos informations ont bien été envoyées. Votre conseiller vous contactera pour la suite.');
-      setForm(initialForm);
+      setForm(isDemo ? demoForm : emptyForm);
     } catch (e) {
       setMessage("Une erreur est survenue pendant l'envoi. Veuillez réessayer ou contacter votre conseiller.");
     } finally {
@@ -194,21 +222,21 @@ function App() {
         <div className="form-section">
           <h2>Informations personnelles</h2>
           <div className="form-grid">
-            <label>Nom<input value={form.legalLastName} onChange={set('legalLastName')} autoComplete="family-name" /></label>
-            <label>Prénoms<input value={form.firstNames} onChange={set('firstNames')} autoComplete="given-name" /></label>
+            <label>NOM<input value={form.legalLastName} onChange={set('legalLastName')} autoComplete="family-name" /></label>
+            <label>PRÉNOMS<input value={form.firstNames} onChange={set('firstNames')} autoComplete="given-name" /></label>
             <label>Date de naissance<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
-            <label>Lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
-            <label>Statut au Canada / état civil : marié, célibataire, monoparental avec enfants, conjoint de fait
+            <label>Lieu de Naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+            <label>VOTRE STATUT AU CANADA ( Marié, Célibataire, Monoparental avec Enfants, Conjoint de fait )
               <select value={form.maritalStatus} onChange={set('maritalStatus')}>
                 <option value="">Sélectionner</option>
                 <option value="marié">Marié</option>
                 <option value="célibataire">Célibataire</option>
-                <option value="monoparental">Monoparental avec enfants</option>
+                <option value="monoparental">Monoparental avec Enfants</option>
                 <option value="conjoint de fait">Conjoint de fait</option>
                 <option value="autre">Autre</option>
               </select>
             </label>
-            <label>Nombre d'enfants<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
+            <label>Si vous Marié, Monoparental ou Conjoint de fait, combien d'enfants avez vous?<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
             <label>Date d'arrivée au Canada<input type="date" value={form.arrivalInCanada} onChange={set('arrivalInCanada')} /></label>
           </div>
         </div>
@@ -216,53 +244,53 @@ function App() {
         <div className="form-section">
           <h2>Coordonnées</h2>
           <div className="form-grid">
-            <label>Téléphone<input value={form.phone} onChange={set('phone')} autoComplete="tel" /></label>
-            <label>Courriel<input value={form.email} onChange={set('email')} autoComplete="email" /></label>
-            <label className="span-2">Adresse domicile : rue, appartement, ville<input value={form.address} onChange={set('address')} autoComplete="street-address" /></label>
-            <label>Code postal<input value={form.postalCode} onChange={set('postalCode')} autoComplete="postal-code" /></label>
+            <label>TÉLÉPHONE<input value={form.phone} onChange={set('phone')} autoComplete="tel" /></label>
+            <label>COURRIEL<input value={form.email} onChange={set('email')} autoComplete="email" /></label>
+            <label className="span-2">ADRESSE DE DOMICILE (Rue, App, Ville)<input value={form.address} onChange={set('address')} autoComplete="street-address" /></label>
+            <label>CODE POSTALE<input value={form.postalCode} onChange={set('postalCode')} autoComplete="postal-code" /></label>
           </div>
         </div>
 
         <div className="form-section">
           <h2>Emploi et revenu</h2>
           <div className="form-grid">
-            <label className="span-2">Emploi actuel, titre et poste<input value={form.occupation} onChange={set('occupation')} /></label>
-            <label className="span-2">Adresse emploi actuel<input value={form.employerAddress} onChange={set('employerAddress')} /></label>
-            <label>Revenu annuel<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>
+            <label className="span-2">EMPLOI ACTUEL, TITRE ET POSTE ( EX: Je suis PAB à l'hopital CISSSS nord de Montreal )<input value={form.occupation} onChange={set('occupation')} /></label>
+            <label className="span-2">ADRESSE DE VOTRE EMPLOI ACTUEL (Rue, Ville et Code Postal)<input value={form.employerAddress} onChange={set('employerAddress')} /></label>
+            <label className="span-2">VOTRE REVENU ANNUEL (ex: 40 000$ ou 25$/ l'heure ) pendant 40h par semaine<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>
           </div>
         </div>
 
         <div className="form-section">
           <h2>Situation financière</h2>
           <div className="form-grid">
-            <label>Total des biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" /></label>
-            <label>Total des dettes<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" /></label>
+            <label className="span-2">TOTAL DE VOS BIENS ( y compris auto, habits et tout ce que vous avez à la maison )<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" /></label>
+            <label className="span-2">TOTAL DE VOS DETTES ( carte et marge de crédit, auto, etc )<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" /></label>
           </div>
         </div>
 
         <div className="form-section">
           <h2>Assurance et budget</h2>
           <div className="form-grid">
-            <label>Assurance vie individuelle existante : oui/non
+            <label>Possédez vous déjà une assurance vie individuelle?
               <select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}>
                 <option value="">Sélectionner</option>
-                <option value="oui">Oui</option>
-                <option value="non">Non</option>
+                <option value="oui">OUI</option>
+                <option value="non">NON</option>
               </select>
             </label>
-            <label className="span-2">Si oui : capital assuré + cotisations assurance / REER / CELI / REEE<textarea value={form.existingInsuranceDetails} onChange={set('existingInsuranceDetails')} /></label>
-            <label className="span-2">Si non : raison<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
-            <label className="span-2">Budget possible pour assurance + retraite + maladies graves + hypothèque<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" /></label>
+            <label className="span-2">Si oui quel est le montant du capital assuré et combien vous cotisez pour le tout à savoir prime d'assurance+ les investissements (REER+ CELI+ REEE) ( ex: j'ai temporaire de 500 000 avec IA et je paie 50$ / mois + paie REER100$ +CELI 50$ et REEE pour 4 enfants je paie 200$ )<textarea value={form.existingInsuranceDetails} onChange={set('existingInsuranceDetails')} /></label>
+            <label className="span-2">Si Non et pourquoi?<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
+            <label className="span-2">Si vous deviez avoir une assurance combinée avec votre cotisation pour votre retraire (REER et CELI), votre 25 maladies graves, votre hypothèque, combien seriez vous capable de payer actuellement ?<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" /></label>
           </div>
         </div>
 
         <div className="form-section">
           <h2>Santé et disponibilité</h2>
           <div className="form-grid">
-            <label>Taille<input value={form.height} onChange={set('height')} /></label>
-            <label>Poids<input value={form.weight} onChange={set('weight')} /></label>
-            <label className="span-2">Disponibilité pour rencontre<textarea value={form.availability} onChange={set('availability')} /></label>
-            <label className="span-2">Projets prioritaires et besoin d'aide<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
+            <label>Quelle est votre taille ?<input value={form.height} onChange={set('height')} /></label>
+            <label>Quel est votre poids ?<input value={form.weight} onChange={set('weight')} /></label>
+            <label className="span-2">Quel jour seriez vous disponible pour une rencontre afin de vous expliquer votre situation? ( veuillez préciser l'heure, soit physiquement chez vous à la maison, dans mon bureau, soit via zoom ) ?<textarea value={form.availability} onChange={set('availability')} /></label>
+            <label className="span-2">Quels sont vos projets les plus prioritaires actuellement et comment pourrais-je vous être utile ?<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
           </div>
         </div>
 
