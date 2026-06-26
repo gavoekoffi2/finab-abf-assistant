@@ -1,0 +1,26 @@
+services:
+  finab-abf-assistant:
+    build:
+      context: /opt/finab-abf-assistant
+      dockerfile: Dockerfile.prod
+    container_name: finab-abf-assistant
+    restart: unless-stopped
+    networks:
+      - web
+    volumes:
+      - finab_abf_data:/app/data
+      - finab_abf_output:/app/output
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.finab-abf.rule=Host(`abf.finablasolution.cloud`) || Host(`finab-abf.76.13.129.252.sslip.io`)"
+      - "traefik.http.routers.finab-abf.entrypoints=websecure"
+      - "traefik.http.routers.finab-abf.tls.certresolver=letsencrypt"
+      - "traefik.http.services.finab-abf.loadbalancer.server.port=8080"
+
+networks:
+  web:
+    external: true
+
+volumes:
+  finab_abf_data:
+  finab_abf_output:
