@@ -12,9 +12,12 @@ services:
       - finab_abf_output:/app/output
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.finab-abf.rule=Host(`abf.finablasolution.cloud`) || Host(`finab-abf.76.13.129.252.sslip.io`)"
-      - "traefik.http.routers.finab-abf.entrypoints=websecure"
-      - "traefik.http.routers.finab-abf.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.finab-abf-temp.rule=Host(`finab-abf.76.13.129.252.sslip.io`)"
+      - "traefik.http.routers.finab-abf-temp.entrypoints=websecure"
+      - "traefik.http.routers.finab-abf-temp.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.finab-abf-final.rule=Host(`abf.finablasolution.cloud`)"
+      - "traefik.http.routers.finab-abf-final.entrypoints=websecure"
+      - "traefik.http.routers.finab-abf-final.tls.certresolver=letsencrypt"
       - "traefik.http.services.finab-abf.loadbalancer.server.port=8080"
 
 networks:
