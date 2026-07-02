@@ -1,4 +1,4 @@
-# FINAB ABF Assistant — Cahier des charges MVP
+# Finab ABF Flow — Cahier des charges
 
 ## Objectif
 
@@ -53,12 +53,32 @@ Chaque conseiller aura un lien unique :
 
 ### 2. Tableau de bord conseiller
 
-- Liste prospects
+- Connexion obligatoire par compte conseiller.
+- Chaque compte appartient à une organisation/cabinet.
+- Liste prospects limitée à l'organisation connectée.
 - Dossier client
 - Données financières
 - Préremplissage ABF
 - Écran de révision conseiller
-- Génération PDF
+- Génération PDF protégée : téléchargement accessible seulement après connexion.
+
+### 2.1 Architecture multi-conseiller MVP
+
+Nom produit opérationnel : **Finab ABF Flow**.
+
+Création de compte : un nouveau conseiller peut créer son compte depuis l'écran connexion, ce qui crée automatiquement son organisation/cabinet et son lien public `/apply/{slug}`.
+
+Super administration : le compte propriétaire FINAB possède le rôle `owner` et accède au centre de contrôle pour voir les statistiques globales, les utilisateurs, les organisations, les prospects, les PDF ABF, créer/désactiver/supprimer des comptes et coordonner la plateforme.
+
+Modèle de données :
+
+- `organizations` : cabinet/conseiller, slug public, coordonnées visibles sur le formulaire.
+- `users` : comptes conseillers liés à une organisation.
+- `sessions` : jetons de connexion expirables.
+- `prospects` : réponses formulaire, rattachées à `organization_id` + `advisor_slug`.
+- `abf_documents` : PDF générés, rattachés à l'organisation du prospect.
+
+Règle d'isolation : les routes conseiller `/api/prospects`, `/api/prospects/{id}` et génération ABF filtrent toujours par `organization_id` du compte connecté. Le formulaire public reste accessible via `/apply/{advisor_slug}`.
 
 ### 3. Moteur de mapping ABF
 

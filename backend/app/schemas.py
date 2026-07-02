@@ -148,3 +148,40 @@ class AbfGenerationResult(BaseModel):
     filled_widget_updates: int
     missing_fields: list[str]
     layout_preserved: bool
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginResult(BaseModel):
+    token: str
+    expires_at: str
+    user: dict
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str = Field(..., min_length=8)
+    full_name: str = Field(..., min_length=2)
+    organization_name: str = ""
+    advisor_phone: str = ""
+
+
+class AdminUserCreate(BaseModel):
+    email: str
+    password: str = Field(..., min_length=8)
+    full_name: str = Field(..., min_length=2)
+    role: str = "advisor"
+    organization_id: str | None = None
+    organization_name: str = ""
+    organization_slug: str = ""
+    advisor_phone: str = ""
+
+
+class AdminUserUpdate(BaseModel):
+    full_name: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+    organization_id: str | None = None

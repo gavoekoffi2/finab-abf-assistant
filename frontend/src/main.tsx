@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CheckCircle2, Download, FileText, Loader2, RefreshCw, ShieldCheck, Users } from 'lucide-react';
+import { CheckCircle2, Download, FileText, Loader2, LogOut, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
 import './styles.css';
 
 type FormState = {
@@ -30,172 +30,74 @@ type FormState = {
   priorityProjects: string;
 };
 
-type ProspectSummary = {
-  id: string;
-  client_name: string;
-  phone: string;
-  email: string;
-  status: string;
-  created_at: string;
-  updated_at?: string;
-};
+type Organization = { id?: string; name: string; slug: string; advisor_name: string; advisor_phone?: string; advisor_email?: string };
+type User = { id: string; email: string; full_name: string; role: string; organization_id: string; organization: Organization; is_active?: boolean };
+type AuthSession = { token: string; expires_at: string; user: User };
+type ProspectSummary = { id: string; organization_id?: string; advisor_slug?: string; client_name: string; phone: string; email: string; status: string; created_at: string; updated_at?: string };
+type ProspectDetail = ProspectSummary & { payload: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
+type AdminOverview = { organizations: number; users: number; active_users: number; prospects: number; documents: number; recent_prospects: ProspectSummary[] };
+type AdminUser = User & { organization: Organization };
 
-type ProspectDetail = ProspectSummary & {
-  payload: any;
-  documents?: Array<{ id?: string; output_path?: string; created_at?: string; result?: any }>;
-};
+const AUTH_KEY = 'finab_abf_session';
 
 const emptyForm: FormState = {
-  legalLastName: '',
-  firstNames: '',
-  dateOfBirth: '',
-  placeOfBirth: '',
-  maritalStatus: '',
-  dependents: '',
-  arrivalInCanada: '',
-  phone: '',
-  email: '',
-  address: '',
-  postalCode: '',
-  occupation: '',
-  employerAddress: '',
-  annualIncome: '',
-  totalAssets: '',
-  totalDebts: '',
-  hasExistingInsurance: '',
-  existingInsuranceDetails: '',
-  noInsuranceReason: '',
-  acceptableBudget: '',
-  height: '',
-  weight: '',
-  availability: '',
-  priorityProjects: '',
+  legalLastName: '', firstNames: '', dateOfBirth: '', placeOfBirth: '', maritalStatus: '', dependents: '', arrivalInCanada: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerAddress: '', annualIncome: '', totalAssets: '', totalDebts: '', hasExistingInsurance: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', priorityProjects: '',
 };
 
-const demoForm: FormState = {
-  legalLastName: 'KOUASSI TEST',
-  firstNames: 'Amina',
-  dateOfBirth: '1988-04-12',
-  placeOfBirth: 'Lomé, Togo',
-  maritalStatus: 'marié',
-  dependents: '2',
-  arrivalInCanada: '2021-09-15',
-  phone: '5145550198',
-  email: 'amina.test@example.com',
-  address: '245 Rue Saint-Denis, Montréal',
-  postalCode: 'H2X 3K8',
-  occupation: "Je suis PAB à l'hôpital CIUSSS du Nord de Montréal",
-  employerAddress: '1200 Boulevard René-Lévesque, Montréal, H3B 4W8',
-  annualIncome: '48 000$',
-  totalAssets: '18 000$',
-  totalDebts: '9 500$',
-  hasExistingInsurance: 'non',
-  existingInsuranceDetails: '',
-  noInsuranceReason: "Je n'ai jamais pris le temps de comparer les options.",
-  acceptableBudget: '150$ par mois',
-  height: '1m68',
-  weight: '72 kg',
-  availability: 'Soirs après 18h ou samedi matin via Zoom',
-  priorityProjects: "Protection familiale, épargne pour les enfants, maladies graves et préparation achat maison.",
-};
-
-const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
-  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+const api = async <T,>(url: string, options?: RequestInit, token?: string): Promise<T> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(url, { ...options, headers: { ...headers, ...(options?.headers || {}) } });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 };
 
-const numberValue = (value: string) => Number(String(value || '').replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
-const parseAddress = (value: string) => {
-  const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
-  return { address: parts[0] || value, city: parts[1] || '', province: parts[2] || 'QC' };
+const storedSession = (): AuthSession | null => {
+  try { return JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch { return null; }
 };
+const numberValue = (value: string) => Number(String(value || '').replace(/[^0-9.,]/g, '').replace(',', '.')) || 0;
+const parseAddress = (value: string) => { const parts = value.split(',').map((part) => part.trim()).filter(Boolean); return { address: parts[0] || value, city: parts[1] || '', province: parts[2] || 'QC' }; };
 const safe = (value: any) => value === null || value === undefined || value === '' ? '—' : String(value);
 const money = (value: any) => Number(value || 0).toLocaleString('fr-CA', { maximumFractionDigits: 0 });
+const advisorSlugFromPath = () => window.location.pathname.startsWith('/apply/') ? window.location.pathname.split('/')[2] || 'finab' : 'finab';
+const statusLabel = (status: string) => ({ new: 'Reçu', abf_generated: 'ABF généré' } as Record<string, string>)[status] || 'En traitement';
+const roleLabel = (role: string) => ({ owner: 'Direction FINAB', admin: 'Responsable', advisor: 'Conseiller' } as Record<string, string>)[role] || 'Conseiller';
 
 function payloadFromForm(form: FormState) {
   const parsedAddress = parseAddress(form.address);
   const hasInsurance = form.hasExistingInsurance === 'oui';
   return {
-    identity: {
-      legal_last_name: form.legalLastName,
-      first_names: form.firstNames,
-      date_of_birth: form.dateOfBirth,
-      sex: 'Non précisé',
-      place_of_birth: form.placeOfBirth,
-      arrival_in_canada: form.arrivalInCanada || null,
-      residency_status: '',
-      marital_status: form.maritalStatus || 'autre',
-      dependents_count: numberValue(form.dependents),
-    },
-    contact: {
-      phone: form.phone,
-      email: form.email,
-      address: parsedAddress.address,
-      city: parsedAddress.city,
-      province: parsedAddress.province,
-      postal_code: form.postalCode,
-    },
-    employment: {
-      occupation: form.occupation,
-      employer_name: '',
-      employer_address: form.employerAddress,
-      annual_income: numberValue(form.annualIncome),
-      monthly_net_income: 0,
-    },
-    financial: {
-      total_assets: numberValue(form.totalAssets),
-      cash_savings: 0,
-      personal_property: numberValue(form.totalAssets),
-      total_debts: numberValue(form.totalDebts),
-      credit_cards: 0,
-      car_loan: 0,
-      student_loan: 0,
-      personal_loan: 0,
-      mortgage: 0,
-      monthly_expenses: 0,
-      monthly_debt_repayment: 0,
-      monthly_savings: 0,
-    },
-    insurance: {
-      has_existing_life_insurance: hasInsurance,
-      existing_life_coverage: 0,
-      existing_monthly_premium: 0,
-      existing_retirement_savings_note: form.existingInsuranceDetails,
-      no_insurance_reason: form.noInsuranceReason,
-    },
-    goals: {
-      short_term_goals: form.priorityProjects,
-      long_term_goals: form.priorityProjects,
-      family_need_if_death: form.priorityProjects,
-      priority_projects: form.priorityProjects,
-      acceptable_monthly_budget: numberValue(form.acceptableBudget),
-      client_preference: form.acceptableBudget,
-    },
+    identity: { legal_last_name: form.legalLastName, first_names: form.firstNames, date_of_birth: form.dateOfBirth, sex: 'Non précisé', place_of_birth: form.placeOfBirth, arrival_in_canada: form.arrivalInCanada || null, residency_status: '', marital_status: form.maritalStatus || 'autre', dependents_count: numberValue(form.dependents) },
+    contact: { phone: form.phone, email: form.email, address: parsedAddress.address, city: parsedAddress.city, province: parsedAddress.province, postal_code: form.postalCode },
+    employment: { occupation: form.occupation, employer_name: '', employer_address: form.employerAddress, annual_income: numberValue(form.annualIncome), monthly_net_income: 0 },
+    financial: { total_assets: numberValue(form.totalAssets), cash_savings: 0, personal_property: numberValue(form.totalAssets), total_debts: numberValue(form.totalDebts), credit_cards: 0, car_loan: 0, student_loan: 0, personal_loan: 0, mortgage: 0, monthly_expenses: 0, monthly_debt_repayment: 0, monthly_savings: 0 },
+    insurance: { has_existing_life_insurance: hasInsurance, existing_life_coverage: 0, existing_monthly_premium: 0, existing_retirement_savings_note: form.existingInsuranceDetails, no_insurance_reason: form.noInsuranceReason },
+    goals: { short_term_goals: form.priorityProjects, long_term_goals: form.priorityProjects, family_need_if_death: form.priorityProjects, priority_projects: form.priorityProjects, acceptable_monthly_budget: numberValue(form.acceptableBudget), client_preference: form.acceptableBudget },
     health: { height: form.height, weight: form.weight, smoker: null, health_notes: '' },
     meeting: { availability: form.availability, preferred_mode: '', consent_acknowledged: true },
   };
 }
 
 function PublicForm() {
-  const isDemo = new URLSearchParams(window.location.search).get('demo') === '1';
-  const [form, setForm] = useState<FormState>(isDemo ? demoForm : emptyForm);
+  const advisorSlug = advisorSlugFromPath();
+  const [organization, setOrganization] = useState<Organization>({ name: 'FINAB Solution', slug: advisorSlug, advisor_name: 'Votre conseiller' });
+  const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const completed = useMemo(() => Boolean(form.legalLastName && form.firstNames && form.dateOfBirth && form.phone && form.email), [form]);
 
+  useEffect(() => { api<Organization>(`/api/organizations/${advisorSlug}/public`).then(setOrganization).catch(() => undefined); }, [advisorSlug]);
+
   async function saveProspect() {
-    setLoading(true);
-    setMessage('');
+    setLoading(true); setMessage('');
     try {
-      await api('/api/prospects?advisor_slug=finab', { method: 'POST', body: JSON.stringify(payloadFromForm(form)) });
+      await api(`/api/prospects?advisor_slug=${encodeURIComponent(advisorSlug)}`, { method: 'POST', body: JSON.stringify(payloadFromForm(form)) });
       setSubmitted(true);
       setMessage('Merci. Vos informations ont bien été envoyées. Votre conseiller vous contactera pour la suite.');
-      setForm(isDemo ? demoForm : emptyForm);
-    } catch {
-      setMessage("Une erreur est survenue pendant l'envoi. Veuillez réessayer ou contacter votre conseiller.");
-    } finally { setLoading(false); }
+      setForm(emptyForm);
+    } catch { setMessage("Une erreur est survenue pendant l'envoi. Veuillez réessayer ou contacter votre conseiller."); }
+    finally { setLoading(false); }
   }
 
   const set = (key: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [key]: event.target.value });
@@ -203,9 +105,9 @@ function PublicForm() {
   return (
     <main className="public-page">
       <section className="public-hero">
-        <div className="brand-line"><div className="mark">F</div><span>FINAB Solution</span></div>
+        <div className="brand-line"><div className="mark">F</div><span>{organization.name}</span></div>
         <h1>COLLECTE D'INFORMATION POUR ABF</h1>
-        <p>Veuillez remplir ce formulaire avec des informations exactes. Ces renseignements permettront à votre conseiller de préparer votre analyse de besoins financiers.</p>
+        <p>Veuillez remplir ce formulaire avec des informations exactes. Ces renseignements permettront à {organization.advisor_name} de préparer votre analyse de besoins financiers.</p>
         <div className="privacy-note"><ShieldCheck size={18}/> Vos informations sont transmises à votre conseiller de façon confidentielle.</div>
       </section>
       {message && <div className={submitted ? 'notice success' : 'notice'}>{submitted && <CheckCircle2 size={20}/>} {message}</div>}
@@ -253,107 +155,219 @@ function PublicForm() {
   );
 }
 
+function LoginScreen({ onLogin, initialMode = 'login' }: { onLogin: (session: AuthSession) => void; initialMode?: 'login' | 'register' }) {
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+  const [email, setEmail] = useState(initialMode === 'register' ? '' : 'KOFFI.AKPOBI@MYGREATWAY.CA');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [organizationName, setOrganizationName] = useState('');
+  const [advisorPhone, setAdvisorPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setLoading(true); setMessage('');
+    try {
+      const body = mode === 'login'
+        ? { email, password }
+        : { email, password, full_name: fullName, organization_name: organizationName, advisor_phone: advisorPhone };
+      const session = await api<AuthSession>(mode === 'login' ? '/api/auth/login' : '/api/auth/register', { method: 'POST', body: JSON.stringify(body) });
+      localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+      onLogin(session);
+    } catch { setMessage(mode === 'login' ? 'Connexion impossible. Vérifie le courriel et le mot de passe.' : 'Création impossible. Vérifie les informations ou utilise un autre courriel.'); }
+    finally { setLoading(false); }
+  }
+  const canSubmit = mode === 'login' ? Boolean(email && password) : Boolean(email && password.length >= 8 && fullName);
+  function switchMode(nextMode: 'login' | 'register') {
+    setMode(nextMode);
+    setMessage('');
+    if (nextMode === 'register' && email === 'KOFFI.AKPOBI@MYGREATWAY.CA') setEmail('');
+    if (nextMode === 'login' && !email) setEmail('KOFFI.AKPOBI@MYGREATWAY.CA');
+  }
+  return (
+    <main className="login-page">
+      <section className="auth-shell">
+        <div className="auth-intro">
+          <div className="brand-line"><div className="mark">F</div><span>FINAB Solution</span></div>
+          <p className="eyebrow">Espace conseiller ABF</p>
+          <h1>Inscription, collecte client et génération ABF dans un seul espace.</h1>
+          <p>Accédez à vos dossiers clients, partagez votre formulaire public et préparez vos documents ABF dans un tableau sécurisé.</p>
+          <div className="auth-benefits">
+            <span>Compte conseiller personnalisé</span>
+            <span>Lien public unique</span>
+            <span>Dossiers clients protégés</span>
+          </div>
+        </div>
+      <form className="login-card flow-auth-card" onSubmit={submit}>
+        <div className="brand-line mobile-auth-brand"><div className="mark">F</div><span>FINAB Solution</span></div>
+        <div className="auth-tabs"><button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => switchMode('login')}>Connexion</button><button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => switchMode('register')}>Inscription</button></div>
+        <h1>{mode === 'login' ? 'Accéder à mon espace conseiller' : 'Créer mon compte conseiller'}</h1>
+        <p>{mode === 'login' ? 'Connectez-vous pour voir vos prospects, générer les PDF ABF et gérer les comptes autorisés.' : 'Remplissez vos informations. Votre espace conseiller et votre lien public sont créés automatiquement.'}</p>
+        {message && <div className="notice">{message}</div>}
+        {mode === 'register' && <label>Nom complet<input value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" /></label>}
+        {mode === 'register' && <label>Nom organisation / cabinet<input value={organizationName} onChange={(e) => setOrganizationName(e.target.value)} placeholder="Ex: Cabinet Finab Montréal" /></label>}
+        {mode === 'register' && <label>Téléphone conseiller<input value={advisorPhone} onChange={(e) => setAdvisorPhone(e.target.value)} autoComplete="tel" /></label>}
+        <label>Courriel<input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label>
+        <label>Mot de passe<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
+        <button className="submit-button" disabled={loading || !canSubmit}>{loading ? <Loader2 className="spin"/> : null} {mode === 'login' ? 'Se connecter' : 'Créer mon compte'}</button>
+        <button type="button" className="text-switch" onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}>{mode === 'login' ? "Nouveau conseiller ? Créer un compte" : 'J’ai déjà un compte conseiller'}</button>
+      </form>
+      </section>
+    </main>
+  );
+}
+
 function AdvisorDashboard() {
+  const [session, setSession] = useState<AuthSession | null>(storedSession());
   const [prospects, setProspects] = useState<ProspectSummary[]>([]);
   const [selected, setSelected] = useState<ProspectDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [pdfUrl, setPdfUrl] = useState('');
+  const [pdfPath, setPdfPath] = useState('');
+  const token = session?.token;
 
   async function refresh(selectId?: string) {
-    const rows = await api<ProspectSummary[]>('/api/prospects?advisor_slug=finab');
+    if (!token) return;
+    const rows = await api<ProspectSummary[]>('/api/prospects', undefined, token);
     setProspects(rows);
     const id = selectId || selected?.id || rows[0]?.id;
     if (id) await loadDetail(id);
+    if (!id) setSelected(null);
   }
   async function loadDetail(id: string) {
-    setLoading(true);
-    setMessage('');
-    setPdfUrl('');
-    try {
-      const detail = await api<ProspectDetail>(`/api/prospects/${id}`);
-      setSelected(detail);
-    } catch {
-      setMessage('Impossible de charger ce prospect.');
-    } finally { setLoading(false); }
+    if (!token) return;
+    setLoading(true); setMessage(''); setPdfPath('');
+    try { setSelected(await api<ProspectDetail>(`/api/prospects/${id}`, undefined, token)); }
+    catch { setMessage('Impossible de charger ce prospect.'); }
+    finally { setLoading(false); }
   }
   async function generateAbf() {
-    if (!selected) return;
-    setLoading(true);
-    setMessage('');
-    setPdfUrl('');
+    if (!selected || !token) return;
+    setLoading(true); setMessage(''); setPdfPath('');
     try {
-      const result = await api<{ output_path: string; pages_after: number; filled_widget_updates: number; layout_preserved: boolean }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: '{}' });
-      setPdfUrl(`/abf/download?path=${encodeURIComponent(result.output_path)}`);
+      const result = await api<{ output_path: string; pages_after: number; filled_widget_updates: number }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: '{}' }, token);
+      setPdfPath(result.output_path);
       setMessage(`ABF généré : ${result.pages_after} pages, ${result.filled_widget_updates} champs remplis.`);
       await refresh(selected.id);
-    } catch {
-      setMessage("Impossible de générer l'ABF pour ce prospect.");
-    } finally { setLoading(false); }
+    } catch { setMessage("Impossible de générer l'ABF pour ce prospect."); }
+    finally { setLoading(false); }
   }
-  useEffect(() => { refresh().catch(() => setMessage('Impossible de charger les prospects.')); }, []);
+  async function downloadPdf(path: string) {
+    if (!token || !path) return;
+    const res = await fetch(`/abf/download?path=${encodeURIComponent(path)}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { setMessage('Téléchargement impossible.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = path.split('/').pop() || 'ABF.pdf'; a.click();
+    URL.revokeObjectURL(url);
+  }
+  function logout() { localStorage.removeItem(AUTH_KEY); setSession(null); setProspects([]); setSelected(null); }
+
+  useEffect(() => { if (token) refresh().catch(() => { localStorage.removeItem(AUTH_KEY); setSession(null); }); }, [token]);
+  if (!session) return <LoginScreen onLogin={setSession} initialMode={window.location.pathname.startsWith('/inscription') ? 'register' : 'login'} />;
 
   const p = selected?.payload;
+  const publicLink = `/apply/${session.user.organization.slug}`;
   return (
     <main className="advisor-page">
       <aside className="advisor-sidebar">
-        <div className="brand-line"><div className="mark">F</div><span>FINAB Conseiller</span></div>
+        <div className="brand-line"><div className="mark">F</div><span>{session.user.organization.name}</span></div>
+        <div className="advisor-user"><strong>{session.user.full_name}</strong><span>{session.user.email}</span></div>
         <button className="refresh-button" onClick={() => refresh()}><RefreshCw size={16}/> Actualiser</button>
+        <button className="refresh-button" onClick={logout}><LogOut size={16}/> Déconnexion</button>
         <div className="prospect-count"><Users size={18}/> {prospects.length} prospect(s)</div>
-        <div className="advisor-list">
-          {prospects.length === 0 && <p className="muted">Aucun prospect reçu pour le moment.</p>}
-          {prospects.map((item) => <button key={item.id} className={selected?.id === item.id ? 'advisor-row selected' : 'advisor-row'} onClick={() => loadDetail(item.id)}><strong>{item.client_name}</strong><span>{item.phone || item.email || 'Sans contact'} · {item.status}</span></button>)}
-        </div>
+        <div className="advisor-list">{prospects.length === 0 && <p className="muted">Aucun prospect reçu pour le moment.</p>}{prospects.map((item) => <button key={item.id} className={selected?.id === item.id ? 'advisor-row selected' : 'advisor-row'} onClick={() => loadDetail(item.id)}><strong>{item.client_name}</strong><span>{item.phone || item.email || 'Sans contact'} · {statusLabel(item.status)}</span></button>)}</div>
       </aside>
       <section className="advisor-content">
-        <header className="advisor-header">
-          <div><p className="eyebrow">Espace conseiller</p><h1>Prospects reçus et génération ABF</h1><p>Les informations envoyées par le formulaire prospect apparaissent ici. Sélectionne un prospect puis clique sur “Générer ABF”.</p></div>
-          <a className="public-link" href="/" target="_blank">Voir formulaire public</a>
-        </header>
-        {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfUrl && <a href={pdfUrl} target="_blank" rel="noreferrer">Télécharger le PDF ABF</a>}</div>}
+        <header className="advisor-header"><div><p className="eyebrow">Espace conseiller</p><h1>{session.user.role === 'owner' ? 'Gestion des conseillers et génération ABF' : 'Prospects reçus et génération ABF'}</h1><p>{session.user.role === 'owner' ? 'Suivez les comptes autorisés, les organisations, les prospects reçus et les PDF ABF générés.' : 'Vous retrouvez ici les dossiers transmis par vos clients et votre lien public de collecte.'}</p></div><a className="public-link" href={publicLink} target="_blank">Voir formulaire public</a></header>
+        {session.user.role === 'owner' && <AdminPanel session={session} />}
+        {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfPath && <button className="inline-link" onClick={() => downloadPdf(pdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
-          <section className="advisor-card client-main">
-            <div><h2>{selected.client_name}</h2><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div>
-            <button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer ABF</button>
-          </section>
+          <section className="advisor-card client-main"><div><h2>{selected.client_name}</h2><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer ABF</button></section>
           <div className="advisor-grid">
-            <InfoCard title="Identité" rows={[
-              ['Nom', p.identity?.legal_last_name], ['Prénoms', p.identity?.first_names], ['Date naissance', p.identity?.date_of_birth], ['Lieu naissance', p.identity?.place_of_birth], ['Statut', p.identity?.marital_status], ['Enfants', p.identity?.dependents_count], ['Arrivée Canada', p.identity?.arrival_in_canada]
-            ]}/>
-            <InfoCard title="Coordonnées" rows={[
-              ['Téléphone', p.contact?.phone], ['Courriel', p.contact?.email], ['Adresse', [p.contact?.address, p.contact?.city, p.contact?.province, p.contact?.postal_code].filter(Boolean).join(', ')]
-            ]}/>
-            <InfoCard title="Emploi / revenus" rows={[
-              ['Poste', p.employment?.occupation], ['Adresse emploi', p.employment?.employer_address], ['Revenu annuel', `$${money(p.employment?.annual_income)}`]
-            ]}/>
-            <InfoCard title="Finances" rows={[
-              ['Total biens', `$${money(p.financial?.total_assets)}`], ['Total dettes', `$${money(p.financial?.total_debts)}`]
-            ]}/>
-            <InfoCard title="Assurance / budget" rows={[
-              ['Assurance existante', p.insurance?.has_existing_life_insurance ? 'Oui' : 'Non'], ['Détails assurance / placements', p.insurance?.existing_retirement_savings_note], ['Si non : raison', p.insurance?.no_insurance_reason], ['Budget possible', `$${money(p.goals?.acceptable_monthly_budget)}`]
-            ]}/>
-            <InfoCard title="Santé / disponibilité / projets" rows={[
-              ['Taille', p.health?.height], ['Poids', p.health?.weight], ['Disponibilité', p.meeting?.availability], ['Projets prioritaires', p.goals?.priority_projects]
-            ]}/>
+            <InfoCard title="Identité" rows={[[ 'Nom', p.identity?.legal_last_name ], [ 'Prénoms', p.identity?.first_names ], [ 'Date naissance', p.identity?.date_of_birth ], [ 'Lieu naissance', p.identity?.place_of_birth ], [ 'Statut', p.identity?.marital_status ], [ 'Enfants', p.identity?.dependents_count ], [ 'Arrivée Canada', p.identity?.arrival_in_canada ]]}/>
+            <InfoCard title="Coordonnées" rows={[[ 'Téléphone', p.contact?.phone ], [ 'Courriel', p.contact?.email ], [ 'Adresse', [p.contact?.address, p.contact?.city, p.contact?.province, p.contact?.postal_code].filter(Boolean).join(', ') ]]}/>
+            <InfoCard title="Emploi / revenus" rows={[[ 'Poste', p.employment?.occupation ], [ 'Adresse emploi', p.employment?.employer_address ], [ 'Revenu annuel', `$${money(p.employment?.annual_income)}` ]]}/>
+            <InfoCard title="Finances" rows={[[ 'Total biens', `$${money(p.financial?.total_assets)}` ], [ 'Total dettes', `$${money(p.financial?.total_debts)}` ]]}/>
+            <InfoCard title="Assurance / budget" rows={[[ 'Assurance existante', p.insurance?.has_existing_life_insurance ? 'Oui' : 'Non' ], [ 'Détails assurance / placements', p.insurance?.existing_retirement_savings_note ], [ 'Si non : raison', p.insurance?.no_insurance_reason ], [ 'Budget possible', `$${money(p.goals?.acceptable_monthly_budget)}` ]]}/>
+            <InfoCard title="Santé / disponibilité / projets" rows={[[ 'Taille', p.health?.height ], [ 'Poids', p.health?.weight ], [ 'Disponibilité', p.meeting?.availability ], [ 'Projets prioritaires', p.goals?.priority_projects ]]}/>
           </div>
-          <section className="advisor-card">
-            <h2>Documents ABF générés</h2>
-            {(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}
-            {selected.documents?.map((doc, idx) => <a className="doc-row" key={idx} href={`/abf/download?path=${encodeURIComponent(doc.output_path || doc.result?.output_path || '')}`} target="_blank" rel="noreferrer"><FileText size={18}/> ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</a>)}
-          </section>
+          <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
     </main>
   );
 }
 
-function InfoCard({ title, rows }: { title: string; rows: Array<[string, any]> }) {
-  return <section className="advisor-card"><h2>{title}</h2><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{safe(value)}</dd></div>)}</dl></section>;
+function AdminPanel({ session }: { session: AuthSession }) {
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'advisor', organization_name: '', organization_slug: '', advisor_phone: '' });
+  const token = session.token;
+  async function refreshAdmin() {
+    setLoading(true); setMessage('');
+    try {
+      const [stats, rows] = await Promise.all([
+        api<AdminOverview>('/api/admin/overview', undefined, token),
+        api<AdminUser[]>('/api/admin/users', undefined, token),
+      ]);
+      setOverview(stats); setUsers(rows);
+    } catch { setMessage('Impossible de charger le tableau super administrateur.'); }
+    finally { setLoading(false); }
+  }
+  async function createAdminUser(event: React.FormEvent) {
+    event.preventDefault(); setLoading(true); setMessage('');
+    try {
+      await api<AdminUser>('/api/admin/users', { method: 'POST', body: JSON.stringify(newUser) }, token);
+      setNewUser({ full_name: '', email: '', password: '', role: 'advisor', organization_name: '', organization_slug: '', advisor_phone: '' });
+      setMessage('Utilisateur créé.'); await refreshAdmin();
+    } catch { setMessage('Création utilisateur impossible.'); setLoading(false); }
+  }
+  async function toggleUser(user: AdminUser) {
+    setLoading(true); setMessage('');
+    try { await api<AdminUser>(`/api/admin/users/${user.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !user.is_active }) }, token); await refreshAdmin(); }
+    catch { setMessage('Modification impossible.'); setLoading(false); }
+  }
+  async function deleteUser(user: AdminUser) {
+    if (!confirm(`Supprimer ${user.full_name} ?`)) return;
+    setLoading(true); setMessage('');
+    try { await api<{ ok: boolean }>(`/api/admin/users/${user.id}`, { method: 'DELETE' }, token); await refreshAdmin(); }
+    catch { setMessage('Suppression impossible.'); setLoading(false); }
+  }
+  useEffect(() => { refreshAdmin(); }, []);
+  return (
+    <section className="admin-panel">
+      <div className="admin-panel-head"><div><p className="eyebrow">Administration FINAB</p><h2>Gestion des conseillers ABF</h2><p>Suivi des comptes, organisations, prospects reçus et PDF ABF générés.</p></div><button className="refresh-button" onClick={refreshAdmin} disabled={loading}><RefreshCw size={16}/> Rafraîchir</button></div>
+      {message && <div className="notice success">{message}</div>}
+      <div className="admin-stats">
+        <div><strong>{overview?.organizations ?? '—'}</strong><span>Organisations</span></div>
+        <div><strong>{overview?.users ?? '—'}</strong><span>Utilisateurs</span></div>
+        <div><strong>{overview?.active_users ?? '—'}</strong><span>Actifs</span></div>
+        <div><strong>{overview?.prospects ?? '—'}</strong><span>Prospects</span></div>
+        <div><strong>{overview?.documents ?? '—'}</strong><span>PDF ABF</span></div>
+      </div>
+      <form className="admin-create" onSubmit={createAdminUser}>
+        <h3><UserPlus size={18}/> Ajouter un utilisateur</h3>
+        <input placeholder="Nom complet" value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} />
+        <input placeholder="Courriel" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+        <input placeholder="Mot de passe provisoire" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} type="password" />
+        <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}><option value="advisor">Conseiller</option><option value="admin">Responsable</option><option value="owner">Direction FINAB</option></select>
+        <input placeholder="Organisation" value={newUser.organization_name} onChange={(e) => setNewUser({ ...newUser, organization_name: e.target.value })} />
+        <input placeholder="Adresse du formulaire ex: conseiller-koffi" value={newUser.organization_slug} onChange={(e) => setNewUser({ ...newUser, organization_slug: e.target.value })} />
+        <input placeholder="Téléphone" value={newUser.advisor_phone} onChange={(e) => setNewUser({ ...newUser, advisor_phone: e.target.value })} />
+        <button className="submit-button compact" disabled={loading || !newUser.email || !newUser.password || !newUser.full_name}>Créer</button>
+      </form>
+      <div className="admin-users">
+        {users.map((user) => <div className="admin-user-row" key={user.id}><div><strong>{user.full_name}</strong><span>{user.email} · {roleLabel(user.role)} · {user.organization?.name}</span><small>/apply/{user.organization?.slug}</small></div><div className="admin-actions"><button onClick={() => toggleUser(user)}>{user.is_active ? 'Désactiver' : 'Activer'}</button><button className="danger" onClick={() => deleteUser(user)} disabled={user.id === session.user.id}><Trash2 size={15}/> Supprimer</button></div></div>)}
+      </div>
+    </section>
+  );
 }
 
-function App() {
-  return window.location.pathname.startsWith('/conseiller') ? <AdvisorDashboard /> : <PublicForm />;
-}
+function InfoCard({ title, rows }: { title: string; rows: Array<[string, any]> }) { return <section className="advisor-card"><h2>{title}</h2><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{safe(value)}</dd></div>)}</dl></section>; }
+function App() { return (window.location.pathname.startsWith('/conseiller') || window.location.pathname.startsWith('/inscription')) ? <AdvisorDashboard /> : <PublicForm />; }
 
 createRoot(document.getElementById('root')!).render(<App />);

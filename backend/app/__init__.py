@@ -1,1 +1,1 @@
-"""FINAB ABF Assistant backend."""
+"""Finab ABF Flow backend."""
