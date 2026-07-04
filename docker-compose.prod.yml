@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile.prod
     container_name: finab-abf-assistant
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - FINAB_PUBLIC_URL=https://abf.finablasolution.cloud
     networks:
