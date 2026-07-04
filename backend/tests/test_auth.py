@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app import storage
+import app.main as main
 from app.main import app
 
 
@@ -211,4 +212,55 @@ def test_owner_create_existing_email_updates_access_and_password() -> None:
     assert old_login.status_code == 401
     new_login = client.post("/api/auth/login", json={"email": "subscriber@example.com", "password": "SecondPass-2026!"})
     assert new_login.status_code == 200
+
+
+def test_checkout_success_endpoint_syncs_access_immediately(monkeypatch) -> None:
+    client = TestClient(app)
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "email": "paid-return@example.com",
+            "password": "PaidReturn-2026!",
+            "full_name": "Conseiller Paiement",
+            "organization_name": "Cabinet Paiement",
+            "advisor_phone": "5140001111",
+        },
+    )
+    assert register.status_code == 200
+    session = register.json()
+    user = session["user"]
+    storage.set_stripe_customer(user["id"], "cus_paid_return")
+    headers = {"Authorization": f"Bearer {session['token']}"}
+
+    class FakeCheckoutSession:
+        @staticmethod
+        def retrieve(session_id, expand=None):
+            assert session_id == "cs_paid_return"
+            return {
+                "id": session_id,
+                "customer": "cus_paid_return",
+                "metadata": {"finab_user_id": user["id"]},
+                "payment_status": "paid",
+                "subscription": {
+                    "id": "sub_paid_return",
+                    "status": "active",
+                    "trial_end": None,
+                    "current_period_end": int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp()),
+                },
+            }
+
+    class FakeStripe:
+        checkout = type("Checkout", (), {"Session": FakeCheckoutSession})
+        Subscription = type("Subscription", (), {"retrieve": staticmethod(lambda subscription_id: None)})
+
+    monkeypatch.setattr(main, "require_stripe", lambda: (FakeStripe, "price_test"))
+    response = client.get("/api/billing/checkout-status?session_id=cs_paid_return", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["has_access"] is True
+    assert data["user"]["subscription"]["status"] == "active"
+    assert data["user"]["subscription"]["last_payment_status"] == "paid"
+
+    prospects = client.get("/api/prospects", headers=headers)
+    assert prospects.status_code == 200
 

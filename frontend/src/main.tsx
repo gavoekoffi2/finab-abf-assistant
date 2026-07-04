@@ -35,6 +35,7 @@ type Organization = { id?: string; name: string; slug: string; advisor_name: str
 type User = { id: string; email: string; full_name: string; role: string; organization_id: string; organization: Organization; is_active?: boolean; subscription?: SubscriptionState };
 type AuthSession = { token: string; expires_at: string; user: User };
 type BillingConfig = { plan_name: string; price_usd: number; trial_days: number; subscription: SubscriptionState } & Record<string, unknown>;
+type CheckoutStatus = { user: User; subscription: SubscriptionState; has_access: boolean };
 type ProspectSummary = { id: string; organization_id?: string; advisor_slug?: string; client_name: string; phone: string; email: string; status: string; created_at: string; updated_at?: string };
 type ProspectDetail = ProspectSummary & { payload: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
 type AdminOverview = { organizations: number; users: number; active_users: number; admins?: number; unlimited_users?: number; prospects: number; documents: number; recent_prospects: ProspectSummary[]; plan_distribution?: Array<{ plan: string; subscription_status: string; c: number }> };
@@ -224,13 +225,17 @@ function BillingScreen({ session, onRefresh, onLogout }: { session: AuthSession;
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const configured = true;
-  async function refreshAccount() {
+  async function refreshAccount(sessionId?: string) {
     try {
-      const current = await api<User>('/api/me', undefined, session.token);
+      setMessage(sessionId ? 'Paiement confirmé. Ouverture de votre espace…' : '');
+      const current = sessionId
+        ? (await api<CheckoutStatus>(`/api/billing/checkout-status?session_id=${encodeURIComponent(sessionId)}`, undefined, session.token)).user
+        : await api<User>('/api/me', undefined, session.token);
       const next = { ...session, user: current };
       localStorage.setItem(AUTH_KEY, JSON.stringify(next));
+      if (current.subscription?.has_access) window.history.replaceState({}, '', '/conseiller');
       onRefresh(next);
-    } catch { setMessage('Impossible de rafraîchir le compte pour le moment.'); }
+    } catch { setMessage('Paiement reçu. Votre accès se prépare, cliquez sur rafraîchir dans quelques secondes.'); }
   }
   async function startCheckout() {
     setLoading(true); setMessage('');
@@ -244,7 +249,7 @@ function BillingScreen({ session, onRefresh, onLogout }: { session: AuthSession;
   useEffect(() => {
     api<BillingConfig>('/api/billing/config', undefined, session.token).then(setConfig).catch(() => setMessage('Activation momentanément indisponible.'));
     const params = new URLSearchParams(window.location.search);
-    if (params.get('checkout') === 'success') refreshAccount();
+    if (params.get('checkout') === 'success') refreshAccount(params.get('session_id') || undefined);
   }, []);
   return (
     <main className="billing-page">
@@ -268,7 +273,7 @@ function BillingScreen({ session, onRefresh, onLogout }: { session: AuthSession;
           </ul>
           {message && <div className="notice">{message}</div>}
           <button className="submit-button billing-cta" onClick={startCheckout} disabled={loading || !configured}>{loading ? <Loader2 className="spin"/> : <CreditCard size={19}/>} {configured ? 'Démarrer l’essai gratuit' : 'Activation bientôt disponible'}</button>
-          <button className="text-switch" onClick={refreshAccount}>J’ai déjà payé, rafraîchir mon accès</button>
+          <button className="text-switch" onClick={() => refreshAccount()}>J’ai déjà payé, rafraîchir mon accès</button>
           <button className="text-switch muted-switch" onClick={onLogout}>Changer de compte</button>
         </div>
       </section>

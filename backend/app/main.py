@@ -70,6 +70,40 @@ def unix_to_iso(value: int | None) -> str | None:
     return datetime.fromtimestamp(value, timezone.utc).isoformat()
 
 
+def stripe_value(obj, key: str, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def sync_user_from_checkout_session(stripe, session_id: str, user: dict) -> dict:
+    checkout = stripe.checkout.Session.retrieve(session_id, expand=["subscription"])
+    metadata = stripe_value(checkout, "metadata", {}) or {}
+    checkout_user_id = metadata.get("finab_user_id") if isinstance(metadata, dict) else stripe_value(metadata, "finab_user_id")
+    checkout_customer_id = stripe_value(checkout, "customer")
+    expected_customer_id = user.get("subscription", {}).get("stripe_customer_id")
+    if checkout_user_id != user["id"] and checkout_customer_id != expected_customer_id:
+        raise HTTPException(status_code=403, detail="Session Stripe non liée à ce compte")
+
+    subscription = stripe_value(checkout, "subscription")
+    if isinstance(subscription, str):
+        subscription = stripe.Subscription.retrieve(subscription)
+    if not subscription:
+        raise HTTPException(status_code=409, detail="Abonnement Stripe en attente de confirmation")
+
+    synced_user = update_subscription_by_user(
+        user["id"],
+        status=stripe_value(subscription, "status", "trialing"),
+        stripe_subscription_id=stripe_value(subscription, "id"),
+        trial_ends_at=unix_to_iso(stripe_value(subscription, "trial_end")),
+        current_period_end=unix_to_iso(stripe_value(subscription, "current_period_end")),
+        last_payment_status=stripe_value(checkout, "payment_status"),
+    )
+    return synced_user
+
+
 def require_stripe():
     secret = os.getenv("STRIPE_SECRET_KEY", "").strip()
     price_id = os.getenv("STRIPE_PRICE_ID", "").strip()
@@ -184,11 +218,24 @@ def create_billing_checkout(user: dict = Depends(current_user)) -> dict:
             "trial_period_days": TRIAL_DAYS,
             "metadata": {"finab_user_id": user["id"], "plan": "finab_pro"},
         },
-        success_url=f"{public_base_url()}/conseiller?checkout=success",
+        success_url=f"{public_base_url()}/conseiller?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{public_base_url()}/conseiller?checkout=cancelled",
         metadata={"finab_user_id": user["id"], "plan": "finab_pro"},
     )
     return {"url": checkout.url}
+
+
+@app.get("/api/billing/checkout-status")
+def billing_checkout_status(session_id: str, user: dict = Depends(current_user)) -> dict:
+    if user.get("role") == "owner":
+        return {"user": user, "subscription": user.get("subscription", {}), "has_access": True}
+    stripe, _ = require_stripe()
+    synced_user = sync_user_from_checkout_session(stripe, session_id, user)
+    return {
+        "user": synced_user,
+        "subscription": synced_user.get("subscription", {}),
+        "has_access": bool(synced_user.get("subscription", {}).get("has_access")),
+    }
 
 
 @app.post("/api/billing/portal")
