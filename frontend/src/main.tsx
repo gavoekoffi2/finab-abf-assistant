@@ -280,6 +280,7 @@ function AdvisorDashboard() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [pdfPath, setPdfPath] = useState('');
+  const [query, setQuery] = useState('');
   const token = session?.token;
 
   async function refresh(selectId?: string) {
@@ -328,24 +329,48 @@ function AdvisorDashboard() {
   if (session.user.role !== 'owner' && !session.user.subscription?.has_access) return <BillingScreen session={session} onRefresh={setSession} onLogout={logout} />;
 
   const p = selected?.payload;
-  const publicLink = `/apply/${session.user.organization.slug}`;
+  const publicLink = `${window.location.origin}/apply/${session.user.organization.slug}`;
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredProspects = prospects.filter((item) => !normalizedQuery || `${item.client_name} ${item.phone} ${item.email} ${statusLabel(item.status)}`.toLowerCase().includes(normalizedQuery));
+  const generatedCount = prospects.filter((item) => item.status === 'abf_generated').length;
+  const pendingCount = Math.max(prospects.length - generatedCount, 0);
+  const selectedStatus = selected ? statusLabel(selected.status) : 'Aucun dossier';
+  const selectedInitials = (selected?.client_name || 'ABF').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'ABF';
   return (
     <main className="advisor-page">
       <aside className="advisor-sidebar">
-        <div className="brand-line"><div className="mark">F</div><span>{session.user.organization.name}</span></div>
-        <div className="advisor-user"><strong>{session.user.full_name}</strong><span>{session.user.email}</span></div>
-        <button className="refresh-button" onClick={() => refresh()}><RefreshCw size={16}/> Actualiser</button>
-        <button className="refresh-button" onClick={logout}><LogOut size={16}/> Déconnexion</button>
-        <div className="prospect-count"><Users size={18}/> {prospects.length} prospect(s)</div>
-        <div className="advisor-list">{prospects.length === 0 && <p className="muted">Aucun prospect reçu pour le moment.</p>}{prospects.map((item) => <button key={item.id} className={selected?.id === item.id ? 'advisor-row selected' : 'advisor-row'} onClick={() => loadDetail(item.id)}><strong>{item.client_name}</strong><span>{item.phone || item.email || 'Sans contact'} · {statusLabel(item.status)}</span></button>)}</div>
+        <div className="sidebar-brand-card">
+          <div className="brand-line"><div className="mark">F</div><span>{session.user.organization.name}</span></div>
+          <p>Console ABF professionnelle</p>
+        </div>
+        <div className="advisor-user"><strong>{session.user.full_name}</strong><span>{session.user.email}</span><small>{roleLabel(session.user.role)}</small></div>
+        <div className="sidebar-actions">
+          <button className="refresh-button" onClick={() => refresh()}><RefreshCw size={16}/> Actualiser</button>
+          <button className="refresh-button" onClick={logout}><LogOut size={16}/> Déconnexion</button>
+        </div>
+        <a className="sidebar-public-link" href={publicLink} target="_blank"><span>Formulaire client</span><strong>{session.user.organization.slug}</strong></a>
+        <label className="sidebar-search">Rechercher un dossier<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, téléphone, courriel…" /></label>
+        <div className="prospect-count"><Users size={18}/> {filteredProspects.length} dossier(s)</div>
+        <div className="advisor-list">{filteredProspects.length === 0 && <p className="muted">Aucun dossier ne correspond à votre recherche.</p>}{filteredProspects.map((item) => <button key={item.id} className={selected?.id === item.id ? 'advisor-row selected' : 'advisor-row'} onClick={() => loadDetail(item.id)}><strong>{item.client_name}</strong><span>{item.phone || item.email || 'Contact à compléter'} · {statusLabel(item.status)}</span></button>)}</div>
       </aside>
       <section className="advisor-content">
-        <header className="advisor-header"><div><p className="eyebrow">Espace conseiller</p><h1>{session.user.role === 'owner' ? 'Gestion des conseillers et génération ABF' : 'Prospects reçus et génération ABF'}</h1><p>{session.user.role === 'owner' ? 'Pilotez les accès conseillers, les organisations, les dossiers reçus et les documents ABF.' : 'Consultez les dossiers transmis par vos clients et partagez votre formulaire personnalisé.'}</p></div><a className="public-link" href={publicLink} target="_blank">Ouvrir mon formulaire</a></header>
+        <header className="advisor-header advisor-command-center"><div><p className="eyebrow">Espace conseiller FINAB</p><h1>{session.user.role === 'owner' ? 'Pilotage des conseillers et dossiers ABF' : 'Dossiers clients et génération ABF'}</h1><p>Un tableau de bord clair pour suivre les demandes reçues, ouvrir le formulaire client et produire les documents ABF validés.</p></div><a className="public-link" href={publicLink} target="_blank">Ouvrir le formulaire client</a></header>
+        <section className="advisor-kpis">
+          <div><span>Dossiers reçus</span><strong>{prospects.length}</strong><small>Total disponible</small></div>
+          <div><span>À traiter</span><strong>{pendingCount}</strong><small>Demandes en attente</small></div>
+          <div><span>PDF ABF</span><strong>{generatedCount}</strong><small>Documents générés</small></div>
+          <div><span>Dossier ouvert</span><strong>{selectedStatus}</strong><small>{selected?.client_name || 'Sélectionnez un client'}</small></div>
+        </section>
+        <section className="advisor-workflow-strip">
+          <div><CheckCircle2 size={18}/><span>1. Recevoir le formulaire</span></div>
+          <div><FileText size={18}/><span>2. Vérifier les informations</span></div>
+          <div><Download size={18}/><span>3. Générer et télécharger l’ABF</span></div>
+        </section>
         {session.user.role === 'owner' && <AdminPanel session={session} />}
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfPath && <button className="inline-link" onClick={() => downloadPdf(pdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
-          <section className="advisor-card client-main"><div><h2>{selected.client_name}</h2><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer ABF</button></section>
+          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF ABF</button></section>
           <div className="advisor-grid">
             <InfoCard title="Identité" rows={[[ 'Nom', p.identity?.legal_last_name ], [ 'Prénoms', p.identity?.first_names ], [ 'Date naissance', p.identity?.date_of_birth ], [ 'Lieu naissance', p.identity?.place_of_birth ], [ 'Statut', p.identity?.marital_status ], [ 'Enfants', p.identity?.dependents_count ], [ 'Arrivée Canada', p.identity?.arrival_in_canada ]]}/>
             <InfoCard title="Coordonnées" rows={[[ 'Téléphone', p.contact?.phone ], [ 'Courriel', p.contact?.email ], [ 'Adresse', [p.contact?.address, p.contact?.city, p.contact?.province, p.contact?.postal_code].filter(Boolean).join(', ') ]]}/>
@@ -407,17 +432,17 @@ function AdminPanel({ session }: { session: AuthSession }) {
         <div><strong>{overview?.organizations ?? '—'}</strong><span>Organisations</span></div>
         <div><strong>{overview?.users ?? '—'}</strong><span>Utilisateurs</span></div>
         <div><strong>{overview?.active_users ?? '—'}</strong><span>Actifs</span></div>
-        <div><strong>{overview?.prospects ?? '—'}</strong><span>Prospects</span></div>
+        <div><strong>{overview?.prospects ?? '—'}</strong><span>Dossiers clients</span></div>
         <div><strong>{overview?.documents ?? '—'}</strong><span>PDF ABF</span></div>
       </div>
       <form className="admin-create" onSubmit={createAdminUser}>
-        <h3><UserPlus size={18}/> Ajouter un utilisateur</h3>
+        <h3><UserPlus size={18}/> Ajouter un conseiller</h3>
         <input placeholder="Nom complet" value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} />
         <input placeholder="Courriel" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
         <input placeholder="Mot de passe provisoire" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} type="password" />
         <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}><option value="advisor">Conseiller</option><option value="admin">Responsable</option><option value="owner">Direction FINAB</option></select>
         <input placeholder="Organisation" value={newUser.organization_name} onChange={(e) => setNewUser({ ...newUser, organization_name: e.target.value })} />
-        <input placeholder="Adresse du formulaire ex: conseiller-koffi" value={newUser.organization_slug} onChange={(e) => setNewUser({ ...newUser, organization_slug: e.target.value })} />
+        <input placeholder="Lien personnalisé du formulaire" value={newUser.organization_slug} onChange={(e) => setNewUser({ ...newUser, organization_slug: e.target.value })} />
         <input placeholder="Téléphone" value={newUser.advisor_phone} onChange={(e) => setNewUser({ ...newUser, advisor_phone: e.target.value })} />
         <button className="submit-button compact" disabled={loading || !newUser.email || !newUser.password || !newUser.full_name}>Créer</button>
       </form>
