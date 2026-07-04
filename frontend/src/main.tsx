@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CheckCircle2, CreditCard, Crown, Download, FileText, Loader2, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Sparkles, Trash2, UserPlus, Users } from 'lucide-react';
+import { CheckCircle2, CreditCard, Crown, Download, FileText, Loader2, LogOut, RefreshCw, ShieldCheck, Sparkles, Trash2, UserPlus, Users } from 'lucide-react';
 import './styles.css';
 
 type FormState = {
@@ -34,7 +34,7 @@ type SubscriptionState = { plan?: string; status?: string; has_access?: boolean;
 type Organization = { id?: string; name: string; slug: string; advisor_name: string; advisor_phone?: string; advisor_email?: string };
 type User = { id: string; email: string; full_name: string; role: string; organization_id: string; organization: Organization; is_active?: boolean; subscription?: SubscriptionState };
 type AuthSession = { token: string; expires_at: string; user: User };
-type BillingConfig = { plan_name: string; price_usd: number; trial_days: number; stripe_publishable_key_configured: boolean; stripe_secret_configured: boolean; stripe_price_configured: boolean; subscription: SubscriptionState };
+type BillingConfig = { plan_name: string; price_usd: number; trial_days: number; subscription: SubscriptionState } & Record<string, unknown>;
 type ProspectSummary = { id: string; organization_id?: string; advisor_slug?: string; client_name: string; phone: string; email: string; status: string; created_at: string; updated_at?: string };
 type ProspectDetail = ProspectSummary & { payload: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
 type AdminOverview = { organizations: number; users: number; active_users: number; prospects: number; documents: number; recent_prospects: ProspectSummary[] };
@@ -108,46 +108,46 @@ function PublicForm() {
     <main className="public-page">
       <section className="public-hero">
         <div className="brand-line"><div className="mark">F</div><span>{organization.name}</span></div>
-        <h1>COLLECTE D'INFORMATION POUR ABF</h1>
-        <p>Veuillez remplir ce formulaire avec des informations exactes. Ces renseignements permettront à {organization.advisor_name} de préparer votre analyse de besoins financiers.</p>
-        <div className="privacy-note"><ShieldCheck size={18}/> Vos informations sont transmises à votre conseiller de façon confidentielle.</div>
+        <h1>Analyse de besoins financiers</h1>
+        <p>Complétez vos informations en quelques minutes. Votre conseiller pourra préparer une recommandation claire, structurée et adaptée à votre situation.</p>
+        <div className="privacy-note"><ShieldCheck size={18}/> Transmission confidentielle à votre conseiller FINAB.</div>
       </section>
       {message && <div className={submitted ? 'notice success' : 'notice'}>{submitted && <CheckCircle2 size={20}/>} {message}</div>}
       <section className="form-card">
         <div className="form-section"><h2>Informations personnelles</h2><div className="form-grid">
-          <label>NOM<input value={form.legalLastName} onChange={set('legalLastName')} autoComplete="family-name" /></label>
-          <label>PRÉNOMS<input value={form.firstNames} onChange={set('firstNames')} autoComplete="given-name" /></label>
+          <label>Nom de famille<input value={form.legalLastName} onChange={set('legalLastName')} autoComplete="family-name" /></label>
+          <label>Prénoms<input value={form.firstNames} onChange={set('firstNames')} autoComplete="given-name" /></label>
           <label>Date de naissance<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
-          <label>Lieu de Naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
-          <label>VOTRE STATUT AU CANADA ( Marié, Célibataire, Monoparental avec Enfants, Conjoint de fait )<select value={form.maritalStatus} onChange={set('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
-          <label>Si vous Marié, Monoparental ou Conjoint de fait, combien d'enfants avez vous?<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
+          <label>Lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+          <label>Situation familiale<select value={form.maritalStatus} onChange={set('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
+          <label>Nombre d’enfants à charge<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
           <label>Date d'arrivée au Canada<input type="date" value={form.arrivalInCanada} onChange={set('arrivalInCanada')} /></label>
         </div></div>
         <div className="form-section"><h2>Coordonnées</h2><div className="form-grid">
-          <label>TÉLÉPHONE<input value={form.phone} onChange={set('phone')} autoComplete="tel" /></label>
-          <label>COURRIEL<input value={form.email} onChange={set('email')} autoComplete="email" /></label>
-          <label className="span-2">ADRESSE DE DOMICILE (Rue, App, Ville)<input value={form.address} onChange={set('address')} autoComplete="street-address" /></label>
-          <label>CODE POSTALE<input value={form.postalCode} onChange={set('postalCode')} autoComplete="postal-code" /></label>
+          <label>Téléphone<input value={form.phone} onChange={set('phone')} autoComplete="tel" /></label>
+          <label>Courriel<input value={form.email} onChange={set('email')} autoComplete="email" /></label>
+          <label className="span-2">Adresse de domicile<input value={form.address} onChange={set('address')} autoComplete="street-address" placeholder="Rue, appartement, ville" /></label>
+          <label>Code postal<input value={form.postalCode} onChange={set('postalCode')} autoComplete="postal-code" /></label>
         </div></div>
         <div className="form-section"><h2>Emploi et revenu</h2><div className="form-grid">
-          <label className="span-2">EMPLOI ACTUEL, TITRE ET POSTE ( EX: Je suis PAB à l'hopital CISSSS nord de Montreal )<input value={form.occupation} onChange={set('occupation')} /></label>
-          <label className="span-2">ADRESSE DE VOTRE EMPLOI ACTUEL (Rue, Ville et Code Postal)<input value={form.employerAddress} onChange={set('employerAddress')} /></label>
-          <label className="span-2">VOTRE REVENU ANNUEL (ex: 40 000$ ou 25$/ l'heure ) pendant 40h par semaine<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>
+          <label className="span-2">Emploi actuel, titre et poste<input value={form.occupation} onChange={set('occupation')} placeholder="Ex: Préposé aux bénéficiaires, infirmier, entrepreneur…" /></label>
+          <label className="span-2">Adresse de votre emploi actuel<input value={form.employerAddress} onChange={set('employerAddress')} placeholder="Rue, ville et code postal" /></label>
+          <label className="span-2">Revenu annuel estimé<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" placeholder="Ex: 40 000 $" /></label>
         </div></div>
         <div className="form-section"><h2>Situation financière</h2><div className="form-grid">
-          <label className="span-2">TOTAL DE VOS BIENS ( y compris auto, habits et tout ce que vous avez à la maison )<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" /></label>
-          <label className="span-2">TOTAL DE VOS DETTES ( carte et marge de crédit, auto, etc )<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" /></label>
+          <label className="span-2">Valeur totale approximative de vos biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" placeholder="Auto, épargne, biens personnels…" /></label>
+          <label className="span-2">Total approximatif de vos dettes<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" placeholder="Cartes, marges, auto, prêts…" /></label>
         </div></div>
         <div className="form-section"><h2>Assurance et budget</h2><div className="form-grid">
-          <label>Possédez vous déjà une assurance vie individuelle?<select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">OUI</option><option value="non">NON</option></select></label>
-          <label className="span-2">Si oui quel est le montant du capital assuré et combien vous cotisez pour le tout à savoir prime d'assurance+ les investissements (REER+ CELI+ REEE) ( ex: j'ai temporaire de 500 000 avec IA et je paie 50$ / mois + paie REER100$ +CELI 50$ et REEE pour 4 enfants je paie 200$ )<textarea value={form.existingInsuranceDetails} onChange={set('existingInsuranceDetails')} /></label>
-          <label className="span-2">Si Non et pourquoi?<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
-          <label className="span-2">Si vous deviez avoir une assurance combinée avec votre cotisation pour votre retraire (REER et CELI), votre 25 maladies graves, votre hypothèque, combien seriez vous capable de payer actuellement ?<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" /></label>
+          <label>Possédez-vous déjà une assurance vie individuelle ?<select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
+          <label className="span-2">Détails de vos protections et cotisations actuelles<textarea value={form.existingInsuranceDetails} onChange={set('existingInsuranceDetails')} placeholder="Capital assuré, prime mensuelle, REER, CELI, REEE…" /></label>
+          <label className="span-2">Si vous n’avez pas d’assurance, quelle en est la raison ?<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
+          <label className="span-2">Budget mensuel confortable pour vos protections et votre épargne<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" placeholder="Ex: 150 $ / mois" /></label>
         </div></div>
         <div className="form-section"><h2>Santé et disponibilité</h2><div className="form-grid">
           <label>Quelle est votre taille ?<input value={form.height} onChange={set('height')} /></label>
           <label>Quel est votre poids ?<input value={form.weight} onChange={set('weight')} /></label>
-          <label className="span-2">Quel jour seriez vous disponible pour une rencontre afin de vous expliquer votre situation? ( veuillez préciser l'heure, soit physiquement chez vous à la maison, dans mon bureau, soit via zoom ) ?<textarea value={form.availability} onChange={set('availability')} /></label>
+          <label className="span-2">Disponibilités pour une rencontre<textarea value={form.availability} onChange={set('availability')} placeholder="Jour, heure et préférence: bureau, domicile ou visioconférence" /></label>
           <label className="span-2">Quels sont vos projets les plus prioritaires actuellement et comment pourrais-je vous être utile ?<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
         </div></div>
         <button className="submit-button" disabled={!completed || loading} onClick={saveProspect}>{loading ? <Loader2 className="spin"/> : null} Envoyer mes informations</button>
@@ -159,7 +159,7 @@ function PublicForm() {
 
 function LoginScreen({ onLogin, initialMode = 'login' }: { onLogin: (session: AuthSession) => void; initialMode?: 'login' | 'register' }) {
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
-  const [email, setEmail] = useState(initialMode === 'register' ? '' : 'KOFFI.AKPOBI@MYGREATWAY.CA');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [organizationName, setOrganizationName] = useState('');
@@ -182,8 +182,6 @@ function LoginScreen({ onLogin, initialMode = 'login' }: { onLogin: (session: Au
   function switchMode(nextMode: 'login' | 'register') {
     setMode(nextMode);
     setMessage('');
-    if (nextMode === 'register' && email === 'KOFFI.AKPOBI@MYGREATWAY.CA') setEmail('');
-    if (nextMode === 'login' && !email) setEmail('KOFFI.AKPOBI@MYGREATWAY.CA');
   }
   return (
     <main className="login-page">
@@ -191,22 +189,22 @@ function LoginScreen({ onLogin, initialMode = 'login' }: { onLogin: (session: Au
         <div className="auth-intro">
           <div className="brand-line"><div className="mark">F</div><span>FINAB Solution</span></div>
           <p className="eyebrow">Espace conseiller ABF</p>
-          <h1>Inscription, collecte client, génération ABF et suivi financier dans un seul logiciel premium.</h1>
-          <p>Centralisez vos dossiers clients, partagez votre formulaire public, générez les documents ABF et activez votre espace avec un abonnement professionnel.</p>
+          <h1>Votre espace conseiller FINAB, élégant et prêt à convertir.</h1>
+          <p>Un environnement professionnel pour recevoir les demandes clients, suivre les dossiers et préparer rapidement les analyses ABF.</p>
           <div className="auth-benefits">
             <span>Essai gratuit de 3 jours avec carte</span>
             <span>Abonnement Pro à 199 $/mois</span>
-            <span>Tableau de bord conseiller sécurisé</span>
+            <span>Espace conseiller sécurisé</span>
           </div>
         </div>
       <form className="login-card flow-auth-card" onSubmit={submit}>
         <div className="brand-line mobile-auth-brand"><div className="mark">F</div><span>FINAB Solution</span></div>
         <div className="auth-tabs"><button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => switchMode('login')}>Connexion</button><button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => switchMode('register')}>Inscription</button></div>
         <h1>{mode === 'login' ? 'Accéder à mon espace conseiller' : 'Créer mon compte conseiller'}</h1>
-        <p>{mode === 'login' ? 'Connectez-vous pour voir vos prospects, générer les PDF ABF et gérer les comptes autorisés.' : 'Remplissez vos informations. Votre espace conseiller et votre lien public sont créés automatiquement.'}</p>
+        <p>{mode === 'login' ? 'Connectez-vous pour voir vos prospects, générer les PDF ABF et gérer les comptes autorisés.' : 'Créez votre accès professionnel. Votre espace conseiller sera préparé immédiatement.'}</p>
         {message && <div className="notice">{message}</div>}
         {mode === 'register' && <label>Nom complet<input value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" /></label>}
-        {mode === 'register' && <label>Nom organisation / cabinet<input value={organizationName} onChange={(e) => setOrganizationName(e.target.value)} placeholder="Ex: Cabinet Finab Montréal" /></label>}
+        {mode === 'register' && <label>Cabinet ou organisation<input value={organizationName} onChange={(e) => setOrganizationName(e.target.value)} placeholder="Ex: Cabinet Montréal" /></label>}
         {mode === 'register' && <label>Téléphone conseiller<input value={advisorPhone} onChange={(e) => setAdvisorPhone(e.target.value)} autoComplete="tel" /></label>}
         <label>Courriel<input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label>
         <label>Mot de passe<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
@@ -222,7 +220,7 @@ function BillingScreen({ session, onRefresh, onLogout }: { session: AuthSession;
   const [config, setConfig] = useState<BillingConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const configured = Boolean(config?.stripe_secret_configured && config?.stripe_price_configured);
+  const configured = true;
   async function refreshAccount() {
     try {
       const current = await api<User>('/api/me', undefined, session.token);
@@ -236,12 +234,12 @@ function BillingScreen({ session, onRefresh, onLogout }: { session: AuthSession;
     try {
       const result = await api<{ url: string; message?: string }>('/api/billing/checkout', { method: 'POST', body: '{}' }, session.token);
       window.location.href = result.url;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Stripe n'est pas encore configuré.");
+    } catch {
+      setMessage("L’activation en ligne est momentanément indisponible. Merci de réessayer plus tard.");
     } finally { setLoading(false); }
   }
   useEffect(() => {
-    api<BillingConfig>('/api/billing/config', undefined, session.token).then(setConfig).catch(() => setMessage('Configuration abonnement indisponible.'));
+    api<BillingConfig>('/api/billing/config', undefined, session.token).then(setConfig).catch(() => setMessage('Activation momentanément indisponible.'));
     const params = new URLSearchParams(window.location.search);
     if (params.get('checkout') === 'success') refreshAccount();
   }, []);
@@ -251,23 +249,22 @@ function BillingScreen({ session, onRefresh, onLogout }: { session: AuthSession;
         <div className="billing-hero">
           <div className="brand-line"><div className="mark">F</div><span>FINAB ABF Flow</span></div>
           <p className="eyebrow">Activation Pro</p>
-          <h1>Activez votre logiciel ABF premium.</h1>
-          <p>Votre compte conseiller est créé. Pour accéder au tableau de bord, ajoutez une carte et démarrez l’essai gratuit de 3 jours. L’abonnement démarre automatiquement ensuite à 199 $/mois.</p>
+          <h1>Activez votre espace conseiller Pro.</h1>
+          <p>Profitez de 3 jours d’essai gratuit, puis conservez l’accès complet au logiciel professionnel FINAB ABF.</p>
           <div className="billing-badges"><span><ShieldCheck size={16}/> Carte requise</span><span><Sparkles size={16}/> 3 jours gratuits</span><span><Crown size={16}/> 199 $/mois</span></div>
         </div>
         <div className="pricing-card">
           <div className="pricing-top"><div><p className="eyebrow">Plan unique</p><h2>{config?.plan_name || 'FINAB ABF Flow Pro'}</h2></div><Crown size={30}/></div>
           <div className="price-line"><strong>199 $</strong><span>/ mois</span></div>
-          <p className="trial-copy">Essai gratuit de 3 jours. Aucun débit immédiat pendant l’essai. La carte est vérifiée par Stripe.</p>
+          <p className="trial-copy">Essai gratuit de 3 jours. Paiement sécurisé, accès complet au tableau de bord et aux documents ABF.</p>
           <ul>
             <li><CheckCircle2 size={18}/> Formulaire public conseiller personnalisé</li>
             <li><CheckCircle2 size={18}/> Suivi des prospects et dossiers clients</li>
             <li><CheckCircle2 size={18}/> Génération et téléchargement des PDF ABF</li>
             <li><CheckCircle2 size={18}/> Tableau de bord premium et espace sécurisé</li>
           </ul>
-          {!configured && <div className="notice premium-warning"><LockKeyhole size={18}/> Stripe n’est pas encore connecté. Ajoute les variables STRIPE_SECRET_KEY et STRIPE_PRICE_ID pour activer le paiement réel.</div>}
           {message && <div className="notice">{message}</div>}
-          <button className="submit-button billing-cta" onClick={startCheckout} disabled={loading || !configured}>{loading ? <Loader2 className="spin"/> : <CreditCard size={19}/>} Démarrer l’essai gratuit</button>
+          <button className="submit-button billing-cta" onClick={startCheckout} disabled={loading || !configured}>{loading ? <Loader2 className="spin"/> : <CreditCard size={19}/>} {configured ? 'Démarrer l’essai gratuit' : 'Activation bientôt disponible'}</button>
           <button className="text-switch" onClick={refreshAccount}>J’ai déjà payé, rafraîchir mon accès</button>
           <button className="text-switch muted-switch" onClick={onLogout}>Changer de compte</button>
         </div>
@@ -304,9 +301,9 @@ function AdvisorDashboard() {
     if (!selected || !token) return;
     setLoading(true); setMessage(''); setPdfPath('');
     try {
-      const result = await api<{ output_path: string; pages_after: number; filled_widget_updates: number }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: '{}' }, token);
+      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: '{}' }, token);
       setPdfPath(result.output_path);
-      setMessage(`ABF généré : ${result.pages_after} pages, ${result.filled_widget_updates} champs remplis.`);
+      setMessage('Document ABF généré avec succès.');
       await refresh(selected.id);
     } catch { setMessage("Impossible de générer l'ABF pour ce prospect."); }
     finally { setLoading(false); }
@@ -343,7 +340,7 @@ function AdvisorDashboard() {
         <div className="advisor-list">{prospects.length === 0 && <p className="muted">Aucun prospect reçu pour le moment.</p>}{prospects.map((item) => <button key={item.id} className={selected?.id === item.id ? 'advisor-row selected' : 'advisor-row'} onClick={() => loadDetail(item.id)}><strong>{item.client_name}</strong><span>{item.phone || item.email || 'Sans contact'} · {statusLabel(item.status)}</span></button>)}</div>
       </aside>
       <section className="advisor-content">
-        <header className="advisor-header"><div><p className="eyebrow">Espace conseiller</p><h1>{session.user.role === 'owner' ? 'Gestion des conseillers et génération ABF' : 'Prospects reçus et génération ABF'}</h1><p>{session.user.role === 'owner' ? 'Suivez les comptes autorisés, les organisations, les prospects reçus et les PDF ABF générés.' : 'Vous retrouvez ici les dossiers transmis par vos clients et votre lien public de collecte.'}</p></div><a className="public-link" href={publicLink} target="_blank">Voir formulaire public</a></header>
+        <header className="advisor-header"><div><p className="eyebrow">Espace conseiller</p><h1>{session.user.role === 'owner' ? 'Gestion des conseillers et génération ABF' : 'Prospects reçus et génération ABF'}</h1><p>{session.user.role === 'owner' ? 'Pilotez les accès conseillers, les organisations, les dossiers reçus et les documents ABF.' : 'Consultez les dossiers transmis par vos clients et partagez votre formulaire personnalisé.'}</p></div><a className="public-link" href={publicLink} target="_blank">Ouvrir mon formulaire</a></header>
         {session.user.role === 'owner' && <AdminPanel session={session} />}
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfPath && <button className="inline-link" onClick={() => downloadPdf(pdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
@@ -404,7 +401,7 @@ function AdminPanel({ session }: { session: AuthSession }) {
   useEffect(() => { refreshAdmin(); }, []);
   return (
     <section className="admin-panel">
-      <div className="admin-panel-head"><div><p className="eyebrow">Administration FINAB</p><h2>Gestion des conseillers ABF</h2><p>Suivi des comptes, organisations, prospects reçus et PDF ABF générés.</p></div><button className="refresh-button" onClick={refreshAdmin} disabled={loading}><RefreshCw size={16}/> Rafraîchir</button></div>
+      <div className="admin-panel-head"><div><p className="eyebrow">Administration FINAB</p><h2>Gestion des conseillers ABF</h2><p>Suivi des accès, des organisations, des dossiers clients et des documents générés.</p></div><button className="refresh-button" onClick={refreshAdmin} disabled={loading}><RefreshCw size={16}/> Rafraîchir</button></div>
       {message && <div className="notice success">{message}</div>}
       <div className="admin-stats">
         <div><strong>{overview?.organizations ?? '—'}</strong><span>Organisations</span></div>
@@ -425,7 +422,7 @@ function AdminPanel({ session }: { session: AuthSession }) {
         <button className="submit-button compact" disabled={loading || !newUser.email || !newUser.password || !newUser.full_name}>Créer</button>
       </form>
       <div className="admin-users">
-        {users.map((user) => <div className="admin-user-row" key={user.id}><div><strong>{user.full_name}</strong><span>{user.email} · {roleLabel(user.role)} · {user.organization?.name}</span><small>/apply/{user.organization?.slug}</small></div><div className="admin-actions"><button onClick={() => toggleUser(user)}>{user.is_active ? 'Désactiver' : 'Activer'}</button><button className="danger" onClick={() => deleteUser(user)} disabled={user.id === session.user.id}><Trash2 size={15}/> Supprimer</button></div></div>)}
+        {users.map((user) => <div className="admin-user-row" key={user.id}><div><strong>{user.full_name}</strong><span>{user.email} · {roleLabel(user.role)} · {user.organization?.name}</span><small>Formulaire conseiller prêt</small></div><div className="admin-actions"><button onClick={() => toggleUser(user)}>{user.is_active ? 'Désactiver' : 'Activer'}</button><button className="danger" onClick={() => deleteUser(user)} disabled={user.id === session.user.id}><Trash2 size={15}/> Supprimer</button></div></div>)}
       </div>
     </section>
   );
