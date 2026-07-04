@@ -126,6 +126,40 @@ def test_owner_can_grant_limited_and_unlimited_access() -> None:
     assert revoke.status_code == 200
     assert revoke.json()["subscription"]["has_access"] is False
 
+def test_admin_director_can_access_admin_controls() -> None:
+    client = TestClient(app)
+    owner_login = client.post(
+        "/api/auth/login",
+        json={"email": "KOFFI.AKPOBI@MYGREATWAY.CA", "password": "Finab-ABF-2026!"},
+    )
+    owner_headers = {"Authorization": f"Bearer {owner_login.json()['token']}"}
+
+    create = client.post(
+        "/api/admin/users",
+        headers=owner_headers,
+        json={
+            "email": "director@example.com",
+            "password": "Director-2026!",
+            "full_name": "Directeur FINAB",
+            "role": "admin",
+            "organization_name": "FINAB Direction",
+            "plan": "enterprise",
+            "subscription_status": "active",
+            "current_period_end": None,
+        },
+    )
+    assert create.status_code == 200
+
+    director_login = client.post("/api/auth/login", json={"email": "director@example.com", "password": "Director-2026!"})
+    assert director_login.status_code == 200
+    director_headers = {"Authorization": f"Bearer {director_login.json()['token']}"}
+
+    overview = client.get("/api/admin/overview", headers=director_headers)
+    assert overview.status_code == 200
+    users = client.get("/api/admin/users", headers=director_headers)
+    assert users.status_code == 200
+
+
 def test_owner_create_existing_email_updates_access_and_password() -> None:
     client = TestClient(app)
     login = client.post(

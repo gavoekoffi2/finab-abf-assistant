@@ -166,8 +166,8 @@ def _unique_slug(conn: sqlite3.Connection, value: str) -> str:
 
 
 def _require_owner(user: dict) -> None:
-    if user.get("role") != "owner":
-        raise PermissionError("Accès super administrateur requis")
+    if user.get("role") not in {"owner", "admin"}:
+        raise PermissionError("Accès administrateur requis")
 
 
 def _parse_dt(value: str | None) -> datetime | None:

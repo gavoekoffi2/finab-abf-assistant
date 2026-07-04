@@ -63,7 +63,7 @@ const safe = (value: any) => value === null || value === undefined || value === 
 const money = (value: any) => Number(value || 0).toLocaleString('fr-CA', { maximumFractionDigits: 0 });
 const advisorSlugFromPath = () => window.location.pathname.startsWith('/apply/') ? window.location.pathname.split('/')[2] || 'finab' : 'finab';
 const statusLabel = (status: string) => ({ new: 'Reçu', abf_generated: 'ABF généré' } as Record<string, string>)[status] || 'En traitement';
-const roleLabel = (role: string) => ({ owner: 'Direction FINAB', admin: 'Responsable', advisor: 'Conseiller' } as Record<string, string>)[role] || 'Conseiller';
+const roleLabel = (role: string) => ({ owner: 'Super administrateur', admin: 'Direction FINAB', advisor: 'Conseiller' } as Record<string, string>)[role] || 'Conseiller';
 const planLabel = (plan?: string) => ({ free: 'Sans accès', finab_pro: 'Pro ABF', enterprise: 'Illimité' } as Record<string, string>)[plan || 'finab_pro'] || 'Pro ABF';
 const accessLabel = (subscription?: SubscriptionState) => subscription?.access_label || (subscription?.has_access ? 'Accès actif' : 'Accès inactif');
 const isoDaysFromNow = (days: number) => { const date = new Date(); date.setDate(date.getDate() + days); return date.toISOString(); };
@@ -325,11 +325,12 @@ function AdvisorDashboard() {
   function logout() { localStorage.removeItem(AUTH_KEY); setSession(null); setProspects([]); setSelected(null); }
 
   useEffect(() => {
-    if (!token || (!session?.user.subscription?.has_access && session?.user.role !== 'owner')) return;
+    if (!token || (!session?.user.subscription?.has_access && !['owner', 'admin'].includes(session?.user.role || ''))) return;
     refresh().catch(() => { localStorage.removeItem(AUTH_KEY); setSession(null); });
   }, [token]);
   if (!session) return <LoginScreen onLogin={setSession} initialMode={window.location.pathname.startsWith('/inscription') ? 'register' : 'login'} />;
-  if (session.user.role !== 'owner' && !session.user.subscription?.has_access) return <BillingScreen session={session} onRefresh={setSession} onLogout={logout} />;
+  const canAdminister = ['owner', 'admin'].includes(session.user.role);
+  if (!canAdminister && !session.user.subscription?.has_access) return <BillingScreen session={session} onRefresh={setSession} onLogout={logout} />;
 
   const p = selected?.payload;
   const publicLink = `${window.location.origin}/apply/${session.user.organization.slug}`;
@@ -357,7 +358,7 @@ function AdvisorDashboard() {
         <div className="advisor-list">{filteredProspects.length === 0 && <p className="muted">Aucun dossier ne correspond à votre recherche.</p>}{filteredProspects.map((item) => <button key={item.id} className={selected?.id === item.id ? 'advisor-row selected' : 'advisor-row'} onClick={() => loadDetail(item.id)}><strong>{item.client_name}</strong><span>{item.phone || item.email || 'Contact à compléter'} · {statusLabel(item.status)}</span></button>)}</div>
       </aside>
       <section className="advisor-content">
-        <header className="advisor-header advisor-command-center"><div><p className="eyebrow">Espace conseiller FINAB</p><h1>{session.user.role === 'owner' ? 'Pilotage des conseillers et dossiers ABF' : 'Dossiers clients et génération ABF'}</h1><p>Un tableau de bord clair pour suivre les demandes reçues, ouvrir le formulaire client et produire les documents ABF validés.</p></div><a className="public-link" href={publicLink} target="_blank">Ouvrir le formulaire client</a></header>
+        <header className="advisor-header advisor-command-center"><div><p className="eyebrow">Espace conseiller FINAB</p><h1>{canAdminister ? 'Pilotage des conseillers et dossiers ABF' : 'Dossiers clients et génération ABF'}</h1><p>Un tableau de bord clair pour suivre les demandes reçues, ouvrir le formulaire client et produire les documents ABF validés.</p></div><a className="public-link" href={publicLink} target="_blank">Ouvrir le formulaire client</a></header>
         <section className="advisor-kpis">
           <div><span>Dossiers reçus</span><strong>{prospects.length}</strong><small>Total disponible</small></div>
           <div><span>À traiter</span><strong>{pendingCount}</strong><small>Demandes en attente</small></div>
@@ -369,7 +370,7 @@ function AdvisorDashboard() {
           <div><FileText size={18}/><span>2. Vérifier les informations</span></div>
           <div><Download size={18}/><span>3. Générer et télécharger l’ABF</span></div>
         </section>
-        {session.user.role === 'owner' && <AdminPanel session={session} />}
+        {canAdminister && <AdminPanel session={session} />}
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfPath && <button className="inline-link" onClick={() => downloadPdf(pdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
@@ -469,7 +470,7 @@ function AdminPanel({ session }: { session: AuthSession }) {
         <input placeholder="Nom complet" value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} />
         <input placeholder="Courriel" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
         <input placeholder="Mot de passe provisoire" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} type="password" />
-        <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}><option value="advisor">Conseiller</option><option value="admin">Responsable</option><option value="owner">Direction FINAB</option></select>
+        <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}><option value="advisor">Conseiller</option><option value="admin">Direction FINAB</option><option value="owner">Super administrateur</option></select>
         <select value={newUser.plan} onChange={(e) => setNewUser({ ...newUser, plan: e.target.value })}><option value="finab_pro">Pro ABF</option><option value="enterprise">Illimité</option><option value="free">Sans accès</option></select>
         <select value={newUser.duration} onChange={(e) => setNewUser({ ...newUser, duration: e.target.value, subscription_status: e.target.value === 'off' ? 'incomplete' : 'active' })}><option value="unlimited">Illimité</option><option value="30">1 mois</option><option value="90">90 jours</option><option value="365">1 an</option><option value="off">Accès non activé</option></select>
         <input placeholder="Organisation" value={newUser.organization_name} onChange={(e) => setNewUser({ ...newUser, organization_name: e.target.value })} />
