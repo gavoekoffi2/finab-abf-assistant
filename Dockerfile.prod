@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
   && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir pymupdf pydantic fastapi uvicorn
+RUN pip install --no-cache-dir pymupdf pydantic fastapi uvicorn stripe
 COPY backend ./backend
 COPY samples/private/ABF_VIERGE.pdf ./samples/private/ABF_VIERGE.pdf
 COPY frontend/dist ./frontend/dist

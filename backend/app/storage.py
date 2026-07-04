@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "finab_abf.sqlite3"
 SESSION_HOURS = 24 * 14
+PLAN_PRICE_USD = 199
+TRIAL_DAYS = 3
+PAID_STATUSES = {"active", "trialing"}
 
 DEFAULT_ORG = {
     "name": "FINAB Solution",
@@ -128,6 +131,13 @@ def connect() -> sqlite3.Connection:
     _ensure_column(conn, "prospects", "organization_id", "TEXT")
     _ensure_column(conn, "abf_documents", "organization_id", "TEXT")
     _ensure_column(conn, "users", "is_active", "INTEGER NOT NULL DEFAULT 1")
+    _ensure_column(conn, "users", "plan", "TEXT NOT NULL DEFAULT 'finab_pro'")
+    _ensure_column(conn, "users", "subscription_status", "TEXT NOT NULL DEFAULT 'incomplete'")
+    _ensure_column(conn, "users", "trial_ends_at", "TEXT")
+    _ensure_column(conn, "users", "current_period_end", "TEXT")
+    _ensure_column(conn, "users", "stripe_customer_id", "TEXT")
+    _ensure_column(conn, "users", "stripe_subscription_id", "TEXT")
+    _ensure_column(conn, "users", "last_payment_status", "TEXT")
     conn.commit()
     _bootstrap_default_account(conn)
     return conn
@@ -158,6 +168,40 @@ def _unique_slug(conn: sqlite3.Connection, value: str) -> str:
 def _require_owner(user: dict) -> None:
     if user.get("role") != "owner":
         raise PermissionError("Accès super administrateur requis")
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _subscription_state(row: sqlite3.Row | dict) -> dict:
+    role = row["role"]
+    status = row["subscription_status"] or "incomplete"
+    trial_end = _parse_dt(row["trial_ends_at"])
+    period_end = _parse_dt(row["current_period_end"])
+    now = datetime.now(timezone.utc)
+    is_owner = role == "owner"
+    in_trial = status == "trialing" and bool(trial_end and trial_end > now)
+    active_paid = status == "active" and (period_end is None or period_end > now)
+    has_access = is_owner or in_trial or active_paid
+    return {
+        "plan": row["plan"] or "finab_pro",
+        "status": "owner_access" if is_owner else status,
+        "has_access": has_access,
+        "in_trial": in_trial,
+        "trial_ends_at": row["trial_ends_at"],
+        "current_period_end": row["current_period_end"],
+        "stripe_customer_id": row["stripe_customer_id"],
+        "stripe_subscription_id": row["stripe_subscription_id"],
+        "last_payment_status": row["last_payment_status"],
+        "price_usd": PLAN_PRICE_USD,
+        "trial_days": TRIAL_DAYS,
+    }
 
 
 def _ensure_organization(
@@ -240,8 +284,8 @@ def _bootstrap_default_account(conn: sqlite3.Connection) -> None:
     if not user:
         conn.execute(
             """
-            INSERT INTO users (id, organization_id, email, password_hash, full_name, role, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (id, organization_id, email, password_hash, full_name, role, subscription_status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 uuid4().hex,
@@ -250,6 +294,7 @@ def _bootstrap_default_account(conn: sqlite3.Connection) -> None:
                 _hash_password(default_password),
                 DEFAULT_ORG["advisor_name"],
                 "owner",
+                "active",
                 ts,
                 ts,
             ),
@@ -304,10 +349,10 @@ def register_account(email: str, password: str, full_name: str, organization_nam
     ts = now_iso()
     conn.execute(
         """
-        INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, subscription_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (uuid4().hex, org_id, clean_email, _hash_password(password), full_name.strip(), "advisor", 1, ts, ts),
+        (uuid4().hex, org_id, clean_email, _hash_password(password), full_name.strip(), "advisor", 1, "incomplete", ts, ts),
     )
     conn.commit()
     result = authenticate(clean_email, password)
@@ -350,10 +395,10 @@ def create_user_by_owner(owner: dict, payload: dict) -> dict:
     user_id = uuid4().hex
     conn.execute(
         """
-        INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, subscription_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (user_id, org_id, clean_email, _hash_password(payload["password"]), payload["full_name"].strip(), role, 1, ts, ts),
+        (user_id, org_id, clean_email, _hash_password(payload["password"]), payload["full_name"].strip(), role, 1, "active", ts, ts),
     )
     conn.commit()
     return get_admin_user(owner, user_id)
@@ -450,6 +495,72 @@ def get_session_user(token: str) -> dict | None:
     user = _row_to_user(row)
     user["organization"] = get_organization(row["organization_id"])
     return user
+
+
+def get_user_by_id(user_id: str) -> dict:
+    conn = connect()
+    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not row:
+        raise KeyError(user_id)
+    user = _row_to_user(row)
+    user["organization"] = get_organization(row["organization_id"])
+    return user
+
+
+def set_stripe_customer(user_id: str, customer_id: str) -> dict:
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET stripe_customer_id=?, updated_at=? WHERE id=?",
+        (customer_id, now_iso(), user_id),
+    )
+    conn.commit()
+    return get_user_by_id(user_id)
+
+
+def update_subscription_by_user(
+    user_id: str,
+    *,
+    status: str,
+    stripe_subscription_id: str | None = None,
+    trial_ends_at: str | None = None,
+    current_period_end: str | None = None,
+    last_payment_status: str | None = None,
+) -> dict:
+    conn = connect()
+    conn.execute(
+        """
+        UPDATE users
+        SET subscription_status=?, stripe_subscription_id=COALESCE(?, stripe_subscription_id),
+            trial_ends_at=?, current_period_end=?, last_payment_status=?, updated_at=?
+        WHERE id=?
+        """,
+        (status, stripe_subscription_id, trial_ends_at, current_period_end, last_payment_status, now_iso(), user_id),
+    )
+    conn.commit()
+    return get_user_by_id(user_id)
+
+
+def update_subscription_by_customer(
+    customer_id: str,
+    *,
+    status: str,
+    stripe_subscription_id: str | None = None,
+    trial_ends_at: str | None = None,
+    current_period_end: str | None = None,
+    last_payment_status: str | None = None,
+) -> dict | None:
+    conn = connect()
+    row = conn.execute("SELECT id FROM users WHERE stripe_customer_id=?", (customer_id,)).fetchone()
+    if not row:
+        return None
+    return update_subscription_by_user(
+        row["id"],
+        status=status,
+        stripe_subscription_id=stripe_subscription_id,
+        trial_ends_at=trial_ends_at,
+        current_period_end=current_period_end,
+        last_payment_status=last_payment_status,
+    )
 
 
 def revoke_session(token: str) -> None:
@@ -617,7 +728,7 @@ def _row_to_org(row: sqlite3.Row) -> dict:
 
 
 def _row_to_user(row: sqlite3.Row) -> dict:
-    return {
+    data = {
         "id": row["id"],
         "organization_id": row["organization_id"],
         "email": row["email"],
@@ -627,6 +738,8 @@ def _row_to_user(row: sqlite3.Row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    data["subscription"] = _subscription_state(row)
+    return data
 
 
 def _row_to_admin_user(row: sqlite3.Row) -> dict:

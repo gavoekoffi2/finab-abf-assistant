@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CheckCircle2, Download, FileText, Loader2, LogOut, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { CheckCircle2, CreditCard, Crown, Download, FileText, Loader2, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Sparkles, Trash2, UserPlus, Users } from 'lucide-react';
 import './styles.css';
 
 type FormState = {
@@ -30,9 +30,11 @@ type FormState = {
   priorityProjects: string;
 };
 
+type SubscriptionState = { plan?: string; status?: string; has_access?: boolean; in_trial?: boolean; trial_ends_at?: string | null; current_period_end?: string | null; price_usd?: number; trial_days?: number };
 type Organization = { id?: string; name: string; slug: string; advisor_name: string; advisor_phone?: string; advisor_email?: string };
-type User = { id: string; email: string; full_name: string; role: string; organization_id: string; organization: Organization; is_active?: boolean };
+type User = { id: string; email: string; full_name: string; role: string; organization_id: string; organization: Organization; is_active?: boolean; subscription?: SubscriptionState };
 type AuthSession = { token: string; expires_at: string; user: User };
+type BillingConfig = { plan_name: string; price_usd: number; trial_days: number; stripe_publishable_key_configured: boolean; stripe_secret_configured: boolean; stripe_price_configured: boolean; subscription: SubscriptionState };
 type ProspectSummary = { id: string; organization_id?: string; advisor_slug?: string; client_name: string; phone: string; email: string; status: string; created_at: string; updated_at?: string };
 type ProspectDetail = ProspectSummary & { payload: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
 type AdminOverview = { organizations: number; users: number; active_users: number; prospects: number; documents: number; recent_prospects: ProspectSummary[] };
@@ -189,12 +191,12 @@ function LoginScreen({ onLogin, initialMode = 'login' }: { onLogin: (session: Au
         <div className="auth-intro">
           <div className="brand-line"><div className="mark">F</div><span>FINAB Solution</span></div>
           <p className="eyebrow">Espace conseiller ABF</p>
-          <h1>Inscription, collecte client et génération ABF dans un seul espace.</h1>
-          <p>Accédez à vos dossiers clients, partagez votre formulaire public et préparez vos documents ABF dans un tableau sécurisé.</p>
+          <h1>Inscription, collecte client, génération ABF et suivi financier dans un seul logiciel premium.</h1>
+          <p>Centralisez vos dossiers clients, partagez votre formulaire public, générez les documents ABF et activez votre espace avec un abonnement professionnel.</p>
           <div className="auth-benefits">
-            <span>Compte conseiller personnalisé</span>
-            <span>Lien public unique</span>
-            <span>Dossiers clients protégés</span>
+            <span>Essai gratuit de 3 jours avec carte</span>
+            <span>Abonnement Pro à 199 $/mois</span>
+            <span>Tableau de bord conseiller sécurisé</span>
           </div>
         </div>
       <form className="login-card flow-auth-card" onSubmit={submit}>
@@ -211,6 +213,64 @@ function LoginScreen({ onLogin, initialMode = 'login' }: { onLogin: (session: Au
         <button className="submit-button" disabled={loading || !canSubmit}>{loading ? <Loader2 className="spin"/> : null} {mode === 'login' ? 'Se connecter' : 'Créer mon compte'}</button>
         <button type="button" className="text-switch" onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}>{mode === 'login' ? "Nouveau conseiller ? Créer un compte" : 'J’ai déjà un compte conseiller'}</button>
       </form>
+      </section>
+    </main>
+  );
+}
+
+function BillingScreen({ session, onRefresh, onLogout }: { session: AuthSession; onRefresh: (session: AuthSession) => void; onLogout: () => void }) {
+  const [config, setConfig] = useState<BillingConfig | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const configured = Boolean(config?.stripe_secret_configured && config?.stripe_price_configured);
+  async function refreshAccount() {
+    try {
+      const current = await api<User>('/api/me', undefined, session.token);
+      const next = { ...session, user: current };
+      localStorage.setItem(AUTH_KEY, JSON.stringify(next));
+      onRefresh(next);
+    } catch { setMessage('Impossible de rafraîchir le compte pour le moment.'); }
+  }
+  async function startCheckout() {
+    setLoading(true); setMessage('');
+    try {
+      const result = await api<{ url: string; message?: string }>('/api/billing/checkout', { method: 'POST', body: '{}' }, session.token);
+      window.location.href = result.url;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Stripe n'est pas encore configuré.");
+    } finally { setLoading(false); }
+  }
+  useEffect(() => {
+    api<BillingConfig>('/api/billing/config', undefined, session.token).then(setConfig).catch(() => setMessage('Configuration abonnement indisponible.'));
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') === 'success') refreshAccount();
+  }, []);
+  return (
+    <main className="billing-page">
+      <section className="billing-shell">
+        <div className="billing-hero">
+          <div className="brand-line"><div className="mark">F</div><span>FINAB ABF Flow</span></div>
+          <p className="eyebrow">Activation Pro</p>
+          <h1>Activez votre logiciel ABF premium.</h1>
+          <p>Votre compte conseiller est créé. Pour accéder au tableau de bord, ajoutez une carte et démarrez l’essai gratuit de 3 jours. L’abonnement démarre automatiquement ensuite à 199 $/mois.</p>
+          <div className="billing-badges"><span><ShieldCheck size={16}/> Carte requise</span><span><Sparkles size={16}/> 3 jours gratuits</span><span><Crown size={16}/> 199 $/mois</span></div>
+        </div>
+        <div className="pricing-card">
+          <div className="pricing-top"><div><p className="eyebrow">Plan unique</p><h2>{config?.plan_name || 'FINAB ABF Flow Pro'}</h2></div><Crown size={30}/></div>
+          <div className="price-line"><strong>199 $</strong><span>/ mois</span></div>
+          <p className="trial-copy">Essai gratuit de 3 jours. Aucun débit immédiat pendant l’essai. La carte est vérifiée par Stripe.</p>
+          <ul>
+            <li><CheckCircle2 size={18}/> Formulaire public conseiller personnalisé</li>
+            <li><CheckCircle2 size={18}/> Suivi des prospects et dossiers clients</li>
+            <li><CheckCircle2 size={18}/> Génération et téléchargement des PDF ABF</li>
+            <li><CheckCircle2 size={18}/> Tableau de bord premium et espace sécurisé</li>
+          </ul>
+          {!configured && <div className="notice premium-warning"><LockKeyhole size={18}/> Stripe n’est pas encore connecté. Ajoute les variables STRIPE_SECRET_KEY et STRIPE_PRICE_ID pour activer le paiement réel.</div>}
+          {message && <div className="notice">{message}</div>}
+          <button className="submit-button billing-cta" onClick={startCheckout} disabled={loading || !configured}>{loading ? <Loader2 className="spin"/> : <CreditCard size={19}/>} Démarrer l’essai gratuit</button>
+          <button className="text-switch" onClick={refreshAccount}>J’ai déjà payé, rafraîchir mon accès</button>
+          <button className="text-switch muted-switch" onClick={onLogout}>Changer de compte</button>
+        </div>
       </section>
     </main>
   );
@@ -263,8 +323,12 @@ function AdvisorDashboard() {
   }
   function logout() { localStorage.removeItem(AUTH_KEY); setSession(null); setProspects([]); setSelected(null); }
 
-  useEffect(() => { if (token) refresh().catch(() => { localStorage.removeItem(AUTH_KEY); setSession(null); }); }, [token]);
+  useEffect(() => {
+    if (!token || (!session?.user.subscription?.has_access && session?.user.role !== 'owner')) return;
+    refresh().catch(() => { localStorage.removeItem(AUTH_KEY); setSession(null); });
+  }, [token]);
   if (!session) return <LoginScreen onLogin={setSession} initialMode={window.location.pathname.startsWith('/inscription') ? 'register' : 'login'} />;
+  if (session.user.role !== 'owner' && !session.user.subscription?.has_access) return <BillingScreen session={session} onRefresh={setSession} onLogout={logout} />;
 
   const p = selected?.payload;
   const publicLink = `/apply/${session.user.organization.slug}`;
