@@ -415,7 +415,16 @@ function AdminPanel({ session }: { session: AuthSession }) {
       await api<AdminUser>('/api/admin/users', { method: 'POST', body: JSON.stringify({ ...newUser, plan, current_period_end }) }, token);
       setNewUser({ full_name: '', email: '', password: '', role: 'advisor', organization_name: '', organization_slug: '', advisor_phone: '', plan: 'finab_pro', subscription_status: 'active', duration: 'unlimited' });
       setMessage('Accès créé et abonnement appliqué.'); await refreshAdmin();
-    } catch { setMessage('Création utilisateur impossible.'); setLoading(false); }
+    } catch (error) {
+      let detail = 'Création utilisateur impossible.';
+      try {
+        const parsed = JSON.parse(error instanceof Error ? error.message : String(error));
+        if (Array.isArray(parsed.detail)) detail = parsed.detail.map((item: any) => item.msg || item.message || String(item)).join(' ');
+        else if (parsed.detail) detail = String(parsed.detail);
+      } catch { /* keep default message */ }
+      setMessage(detail);
+      setLoading(false);
+    }
   }
   async function grantAccess(user: AdminUser, duration: 'unlimited' | '30' | '90' | '365' | 'off', plan: 'finab_pro' | 'enterprise' = 'finab_pro') {
     setLoading(true); setMessage('');

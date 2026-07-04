@@ -394,8 +394,6 @@ def create_user_by_owner(owner: dict, payload: dict) -> dict:
     _require_owner(owner)
     conn = connect()
     clean_email = payload["email"].strip().lower()
-    if conn.execute("SELECT id FROM users WHERE email=?", (clean_email,)).fetchone():
-        raise ValueError("Ce courriel existe déjà")
     org_id = _ensure_organization(
         conn,
         organization_id=payload.get("organization_id"),
@@ -409,29 +407,54 @@ def create_user_by_owner(owner: dict, payload: dict) -> dict:
     plan = payload.get("plan") if payload.get("plan") in {"free", "finab_pro", "enterprise"} else "finab_pro"
     subscription_status = payload.get("subscription_status") if payload.get("subscription_status") in {"incomplete", "trialing", "active", "past_due", "canceled"} else "active"
     current_period_end = payload.get("current_period_end") or None
+    last_payment_status = "admin_grant" if subscription_status == "active" else None
     ts = now_iso()
-    user_id = uuid4().hex
-    conn.execute(
-        """
-        INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, plan, subscription_status, current_period_end, last_payment_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            org_id,
-            clean_email,
-            _hash_password(payload["password"]),
-            payload["full_name"].strip(),
-            role,
-            1,
-            plan,
-            subscription_status,
-            current_period_end,
-            "admin_grant" if subscription_status == "active" else None,
-            ts,
-            ts,
-        ),
-    )
+    existing = conn.execute("SELECT id FROM users WHERE email=?", (clean_email,)).fetchone()
+    if existing:
+        user_id = existing["id"]
+        conn.execute(
+            """
+            UPDATE users
+            SET organization_id=?, password_hash=?, full_name=?, role=?, is_active=1,
+                plan=?, subscription_status=?, current_period_end=?, last_payment_status=?, updated_at=?
+            WHERE id=?
+            """,
+            (
+                org_id,
+                _hash_password(payload["password"]),
+                payload["full_name"].strip(),
+                role,
+                plan,
+                subscription_status,
+                current_period_end,
+                last_payment_status,
+                ts,
+                user_id,
+            ),
+        )
+    else:
+        user_id = uuid4().hex
+        conn.execute(
+            """
+            INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, plan, subscription_status, current_period_end, last_payment_status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                org_id,
+                clean_email,
+                _hash_password(payload["password"]),
+                payload["full_name"].strip(),
+                role,
+                1,
+                plan,
+                subscription_status,
+                current_period_end,
+                last_payment_status,
+                ts,
+                ts,
+            ),
+        )
     conn.commit()
     return get_admin_user(owner, user_id)
 

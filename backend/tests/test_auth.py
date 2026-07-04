@@ -125,3 +125,56 @@ def test_owner_can_grant_limited_and_unlimited_access() -> None:
     )
     assert revoke.status_code == 200
     assert revoke.json()["subscription"]["has_access"] is False
+
+def test_owner_create_existing_email_updates_access_and_password() -> None:
+    client = TestClient(app)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "KOFFI.AKPOBI@MYGREATWAY.CA", "password": "Finab-ABF-2026!"},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+
+    create = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "email": "subscriber@example.com",
+            "password": "FirstPass-2026!",
+            "full_name": "Abonné Initial",
+            "role": "advisor",
+            "organization_name": "Cabinet Initial",
+            "plan": "finab_pro",
+            "subscription_status": "active",
+            "current_period_end": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+        },
+    )
+    assert create.status_code == 200
+    user_id = create.json()["id"]
+
+    update = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "email": "subscriber@example.com",
+            "password": "SecondPass-2026!",
+            "full_name": "Abonné Promu",
+            "role": "admin",
+            "organization_name": "Cabinet Promu",
+            "plan": "enterprise",
+            "subscription_status": "active",
+            "current_period_end": None,
+        },
+    )
+    assert update.status_code == 200
+    data = update.json()
+    assert data["id"] == user_id
+    assert data["full_name"] == "Abonné Promu"
+    assert data["role"] == "admin"
+    assert data["subscription"]["has_access"] is True
+    assert data["subscription"]["current_period_end"] is None
+
+    old_login = client.post("/api/auth/login", json={"email": "subscriber@example.com", "password": "FirstPass-2026!"})
+    assert old_login.status_code == 401
+    new_login = client.post("/api/auth/login", json={"email": "subscriber@example.com", "password": "SecondPass-2026!"})
+    assert new_login.status_code == 200
+
