@@ -178,6 +178,9 @@ class AdminUserCreate(BaseModel):
     organization_name: str = ""
     organization_slug: str = ""
     advisor_phone: str = ""
+    plan: str = "finab_pro"
+    subscription_status: str = "active"
+    current_period_end: str | None = None
 
 
 class AdminUserUpdate(BaseModel):
@@ -185,3 +188,8 @@ class AdminUserUpdate(BaseModel):
     role: str | None = None
     is_active: bool | None = None
     organization_id: str | None = None
+    plan: str | None = None
+    subscription_status: str | None = None
+    trial_ends_at: str | None = None
+    current_period_end: str | None = None
+    last_payment_status: str | None = None

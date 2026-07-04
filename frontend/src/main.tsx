@@ -30,14 +30,14 @@ type FormState = {
   priorityProjects: string;
 };
 
-type SubscriptionState = { plan?: string; status?: string; has_access?: boolean; in_trial?: boolean; trial_ends_at?: string | null; current_period_end?: string | null; price_usd?: number; trial_days?: number };
+type SubscriptionState = { plan?: string; status?: string; effective_status?: string; access_label?: string; has_access?: boolean; in_trial?: boolean; trial_ends_at?: string | null; current_period_end?: string | null; price_usd?: number; trial_days?: number };
 type Organization = { id?: string; name: string; slug: string; advisor_name: string; advisor_phone?: string; advisor_email?: string };
 type User = { id: string; email: string; full_name: string; role: string; organization_id: string; organization: Organization; is_active?: boolean; subscription?: SubscriptionState };
 type AuthSession = { token: string; expires_at: string; user: User };
 type BillingConfig = { plan_name: string; price_usd: number; trial_days: number; subscription: SubscriptionState } & Record<string, unknown>;
 type ProspectSummary = { id: string; organization_id?: string; advisor_slug?: string; client_name: string; phone: string; email: string; status: string; created_at: string; updated_at?: string };
 type ProspectDetail = ProspectSummary & { payload: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
-type AdminOverview = { organizations: number; users: number; active_users: number; prospects: number; documents: number; recent_prospects: ProspectSummary[] };
+type AdminOverview = { organizations: number; users: number; active_users: number; admins?: number; unlimited_users?: number; prospects: number; documents: number; recent_prospects: ProspectSummary[]; plan_distribution?: Array<{ plan: string; subscription_status: string; c: number }> };
 type AdminUser = User & { organization: Organization };
 
 const AUTH_KEY = 'finab_abf_session';
@@ -64,6 +64,9 @@ const money = (value: any) => Number(value || 0).toLocaleString('fr-CA', { maxim
 const advisorSlugFromPath = () => window.location.pathname.startsWith('/apply/') ? window.location.pathname.split('/')[2] || 'finab' : 'finab';
 const statusLabel = (status: string) => ({ new: 'Reçu', abf_generated: 'ABF généré' } as Record<string, string>)[status] || 'En traitement';
 const roleLabel = (role: string) => ({ owner: 'Direction FINAB', admin: 'Responsable', advisor: 'Conseiller' } as Record<string, string>)[role] || 'Conseiller';
+const planLabel = (plan?: string) => ({ free: 'Sans accès', finab_pro: 'Pro ABF', enterprise: 'Illimité' } as Record<string, string>)[plan || 'finab_pro'] || 'Pro ABF';
+const accessLabel = (subscription?: SubscriptionState) => subscription?.access_label || (subscription?.has_access ? 'Accès actif' : 'Accès inactif');
+const isoDaysFromNow = (days: number) => { const date = new Date(); date.setDate(date.getDate() + days); return date.toISOString(); };
 
 function payloadFromForm(form: FormState) {
   const parsedAddress = parseAddress(form.address);
@@ -391,7 +394,7 @@ function AdminPanel({ session }: { session: AuthSession }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'advisor', organization_name: '', organization_slug: '', advisor_phone: '' });
+  const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'advisor', organization_name: '', organization_slug: '', advisor_phone: '', plan: 'finab_pro', subscription_status: 'active', duration: 'unlimited' });
   const token = session.token;
   async function refreshAdmin() {
     setLoading(true); setMessage('');
@@ -407,10 +410,25 @@ function AdminPanel({ session }: { session: AuthSession }) {
   async function createAdminUser(event: React.FormEvent) {
     event.preventDefault(); setLoading(true); setMessage('');
     try {
-      await api<AdminUser>('/api/admin/users', { method: 'POST', body: JSON.stringify(newUser) }, token);
-      setNewUser({ full_name: '', email: '', password: '', role: 'advisor', organization_name: '', organization_slug: '', advisor_phone: '' });
-      setMessage('Utilisateur créé.'); await refreshAdmin();
+      const current_period_end = newUser.subscription_status === 'active' && newUser.duration !== 'unlimited' ? isoDaysFromNow(Number(newUser.duration)) : null;
+      const plan = newUser.duration === 'off' ? 'free' : newUser.plan;
+      await api<AdminUser>('/api/admin/users', { method: 'POST', body: JSON.stringify({ ...newUser, plan, current_period_end }) }, token);
+      setNewUser({ full_name: '', email: '', password: '', role: 'advisor', organization_name: '', organization_slug: '', advisor_phone: '', plan: 'finab_pro', subscription_status: 'active', duration: 'unlimited' });
+      setMessage('Accès créé et abonnement appliqué.'); await refreshAdmin();
     } catch { setMessage('Création utilisateur impossible.'); setLoading(false); }
+  }
+  async function grantAccess(user: AdminUser, duration: 'unlimited' | '30' | '90' | '365' | 'off', plan: 'finab_pro' | 'enterprise' = 'finab_pro') {
+    setLoading(true); setMessage('');
+    const body = duration === 'off'
+      ? { plan: 'free', subscription_status: 'incomplete', current_period_end: null, last_payment_status: 'admin_revoked' }
+      : { plan, subscription_status: 'active', current_period_end: duration === 'unlimited' ? null : isoDaysFromNow(Number(duration)), last_payment_status: 'admin_grant' };
+    try { await api<AdminUser>(`/api/admin/users/${user.id}`, { method: 'PATCH', body: JSON.stringify(body) }, token); setMessage(`Accès mis à jour pour ${user.full_name}.`); await refreshAdmin(); }
+    catch { setMessage('Mise à jour abonnement impossible.'); setLoading(false); }
+  }
+  async function changeRole(user: AdminUser, role: string) {
+    setLoading(true); setMessage('');
+    try { await api<AdminUser>(`/api/admin/users/${user.id}`, { method: 'PATCH', body: JSON.stringify({ role }) }, token); await refreshAdmin(); }
+    catch { setMessage('Modification du rôle impossible.'); setLoading(false); }
   }
   async function toggleUser(user: AdminUser) {
     setLoading(true); setMessage('');
@@ -426,28 +444,32 @@ function AdminPanel({ session }: { session: AuthSession }) {
   useEffect(() => { refreshAdmin(); }, []);
   return (
     <section className="admin-panel">
-      <div className="admin-panel-head"><div><p className="eyebrow">Administration FINAB</p><h2>Gestion des conseillers ABF</h2><p>Suivi des accès, des organisations, des dossiers clients et des documents générés.</p></div><button className="refresh-button" onClick={refreshAdmin} disabled={loading}><RefreshCw size={16}/> Rafraîchir</button></div>
+      <div className="admin-panel-head"><div><p className="eyebrow">Super administration FINAB</p><h2>Commandes générales de la plateforme</h2><p>Créez des administrateurs, activez des abonnements illimités ou limités, bloquez les comptes et surveillez toute l’activité ABF.</p></div><button className="refresh-button" onClick={refreshAdmin} disabled={loading}><RefreshCw size={16}/> Rafraîchir</button></div>
       {message && <div className="notice success">{message}</div>}
       <div className="admin-stats">
         <div><strong>{overview?.organizations ?? '—'}</strong><span>Organisations</span></div>
         <div><strong>{overview?.users ?? '—'}</strong><span>Utilisateurs</span></div>
         <div><strong>{overview?.active_users ?? '—'}</strong><span>Actifs</span></div>
+        <div><strong>{overview?.admins ?? '—'}</strong><span>Administrateurs</span></div>
+        <div><strong>{overview?.unlimited_users ?? '—'}</strong><span>Illimités</span></div>
         <div><strong>{overview?.prospects ?? '—'}</strong><span>Dossiers clients</span></div>
         <div><strong>{overview?.documents ?? '—'}</strong><span>PDF ABF</span></div>
       </div>
       <form className="admin-create" onSubmit={createAdminUser}>
-        <h3><UserPlus size={18}/> Ajouter un conseiller</h3>
+        <h3><UserPlus size={18}/> Ajouter un administrateur ou un abonné</h3>
         <input placeholder="Nom complet" value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} />
         <input placeholder="Courriel" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
         <input placeholder="Mot de passe provisoire" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} type="password" />
         <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}><option value="advisor">Conseiller</option><option value="admin">Responsable</option><option value="owner">Direction FINAB</option></select>
+        <select value={newUser.plan} onChange={(e) => setNewUser({ ...newUser, plan: e.target.value })}><option value="finab_pro">Pro ABF</option><option value="enterprise">Illimité</option><option value="free">Sans accès</option></select>
+        <select value={newUser.duration} onChange={(e) => setNewUser({ ...newUser, duration: e.target.value, subscription_status: e.target.value === 'off' ? 'incomplete' : 'active' })}><option value="unlimited">Illimité</option><option value="30">1 mois</option><option value="90">90 jours</option><option value="365">1 an</option><option value="off">Accès non activé</option></select>
         <input placeholder="Organisation" value={newUser.organization_name} onChange={(e) => setNewUser({ ...newUser, organization_name: e.target.value })} />
         <input placeholder="Lien personnalisé du formulaire" value={newUser.organization_slug} onChange={(e) => setNewUser({ ...newUser, organization_slug: e.target.value })} />
         <input placeholder="Téléphone" value={newUser.advisor_phone} onChange={(e) => setNewUser({ ...newUser, advisor_phone: e.target.value })} />
         <button className="submit-button compact" disabled={loading || !newUser.email || !newUser.password || !newUser.full_name}>Créer</button>
       </form>
       <div className="admin-users">
-        {users.map((user) => <div className="admin-user-row" key={user.id}><div><strong>{user.full_name}</strong><span>{user.email} · {roleLabel(user.role)} · {user.organization?.name}</span><small>Formulaire conseiller prêt</small></div><div className="admin-actions"><button onClick={() => toggleUser(user)}>{user.is_active ? 'Désactiver' : 'Activer'}</button><button className="danger" onClick={() => deleteUser(user)} disabled={user.id === session.user.id}><Trash2 size={15}/> Supprimer</button></div></div>)}
+        {users.map((user) => <div className="admin-user-row" key={user.id}><div><strong>{user.full_name}</strong><span>{user.email} · {roleLabel(user.role)} · {user.organization?.name}</span><small>{planLabel(user.subscription?.plan)} · {accessLabel(user.subscription)} · {user.is_active ? 'Compte actif' : 'Compte bloqué'}</small></div><div className="admin-actions admin-actions-wrap"><select value={user.role} onChange={(event) => changeRole(user, event.target.value)} disabled={user.id === session.user.id}><option value="advisor">Conseiller</option><option value="admin">Responsable</option><option value="owner">Direction FINAB</option></select><button onClick={() => grantAccess(user, 'unlimited', 'enterprise')}>Illimité</button><button onClick={() => grantAccess(user, '30')}>1 mois</button><button onClick={() => grantAccess(user, '90')}>90 jours</button><button onClick={() => grantAccess(user, '365')}>1 an</button><button onClick={() => grantAccess(user, 'off')}>Couper accès</button><button onClick={() => toggleUser(user)}>{user.is_active ? 'Bloquer' : 'Réactiver'}</button><button className="danger" onClick={() => deleteUser(user)} disabled={user.id === session.user.id}><Trash2 size={15}/> Supprimer</button></div></div>)}
       </div>
     </section>
   );

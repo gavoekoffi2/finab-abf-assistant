@@ -181,17 +181,20 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 def _subscription_state(row: sqlite3.Row | dict) -> dict:
     role = row["role"]
+    plan = row["plan"] or "finab_pro"
     status = row["subscription_status"] or "incomplete"
     trial_end = _parse_dt(row["trial_ends_at"])
     period_end = _parse_dt(row["current_period_end"])
     now = datetime.now(timezone.utc)
     is_owner = role == "owner"
     in_trial = status == "trialing" and bool(trial_end and trial_end > now)
-    active_paid = status == "active" and (period_end is None or period_end > now)
+    active_paid = plan != "free" and status == "active" and (period_end is None or period_end > now)
     has_access = is_owner or in_trial or active_paid
     return {
-        "plan": row["plan"] or "finab_pro",
+        "plan": plan,
         "status": "owner_access" if is_owner else status,
+        "effective_status": "active" if has_access else "inactive",
+        "access_label": _access_label(is_owner, plan, status, period_end, now),
         "has_access": has_access,
         "in_trial": in_trial,
         "trial_ends_at": row["trial_ends_at"],
@@ -202,6 +205,18 @@ def _subscription_state(row: sqlite3.Row | dict) -> dict:
         "price_usd": PLAN_PRICE_USD,
         "trial_days": TRIAL_DAYS,
     }
+
+
+def _access_label(is_owner: bool, plan: str, status: str, period_end: datetime | None, now: datetime) -> str:
+    if is_owner:
+        return "Super administrateur — accès illimité"
+    if plan == "free" or status != "active":
+        return "Accès non activé"
+    if period_end is None:
+        return "Abonnement illimité"
+    if period_end > now:
+        return f"Abonnement actif jusqu'au {period_end.date().isoformat()}"
+    return "Abonnement expiré"
 
 
 def _ensure_organization(
@@ -391,14 +406,31 @@ def create_user_by_owner(owner: dict, payload: dict) -> dict:
         advisor_email=clean_email,
     )
     role = payload.get("role") if payload.get("role") in {"owner", "admin", "advisor"} else "advisor"
+    plan = payload.get("plan") if payload.get("plan") in {"free", "finab_pro", "enterprise"} else "finab_pro"
+    subscription_status = payload.get("subscription_status") if payload.get("subscription_status") in {"incomplete", "trialing", "active", "past_due", "canceled"} else "active"
+    current_period_end = payload.get("current_period_end") or None
     ts = now_iso()
     user_id = uuid4().hex
     conn.execute(
         """
-        INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, subscription_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, organization_id, email, password_hash, full_name, role, is_active, plan, subscription_status, current_period_end, last_payment_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (user_id, org_id, clean_email, _hash_password(payload["password"]), payload["full_name"].strip(), role, 1, "active", ts, ts),
+        (
+            user_id,
+            org_id,
+            clean_email,
+            _hash_password(payload["password"]),
+            payload["full_name"].strip(),
+            role,
+            1,
+            plan,
+            subscription_status,
+            current_period_end,
+            "admin_grant" if subscription_status == "active" else None,
+            ts,
+            ts,
+        ),
     )
     conn.commit()
     return get_admin_user(owner, user_id)
@@ -441,6 +473,23 @@ def update_user_by_owner(owner: dict, user_id: str, payload: dict) -> dict:
     if payload.get("organization_id") is not None:
         allowed.append("organization_id=?")
         params.append(payload["organization_id"])
+    if payload.get("plan") is not None:
+        plan = payload["plan"] if payload["plan"] in {"free", "finab_pro", "enterprise"} else "finab_pro"
+        allowed.append("plan=?")
+        params.append(plan)
+    if payload.get("subscription_status") is not None:
+        status = payload["subscription_status"] if payload["subscription_status"] in {"incomplete", "trialing", "active", "past_due", "canceled"} else "incomplete"
+        allowed.append("subscription_status=?")
+        params.append(status)
+    if "trial_ends_at" in payload:
+        allowed.append("trial_ends_at=?")
+        params.append(payload.get("trial_ends_at") or None)
+    if "current_period_end" in payload:
+        allowed.append("current_period_end=?")
+        params.append(payload.get("current_period_end") or None)
+    if payload.get("last_payment_status") is not None:
+        allowed.append("last_payment_status=?")
+        params.append(payload["last_payment_status"])
     if not allowed:
         return get_admin_user(owner, user_id)
     allowed.append("updated_at=?")
@@ -468,10 +517,16 @@ def admin_overview(owner: dict) -> dict:
     visible_prospects = list_prospects()
     visible_ids = {prospect["id"] for prospect in visible_prospects}
     documents = conn.execute("SELECT * FROM abf_documents").fetchall()
+    plan_rows = conn.execute(
+        "SELECT plan, subscription_status, COUNT(*) AS c FROM users GROUP BY plan, subscription_status"
+    ).fetchall()
     return {
         "organizations": conn.execute("SELECT COUNT(*) AS c FROM organizations").fetchone()["c"],
         "users": conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"],
         "active_users": conn.execute("SELECT COUNT(*) AS c FROM users WHERE is_active=1").fetchone()["c"],
+        "admins": conn.execute("SELECT COUNT(*) AS c FROM users WHERE role IN ('owner','admin')").fetchone()["c"],
+        "unlimited_users": conn.execute("SELECT COUNT(*) AS c FROM users WHERE (role='owner' OR subscription_status='active') AND current_period_end IS NULL AND COALESCE(plan, 'finab_pro')!='free'").fetchone()["c"],
+        "plan_distribution": [dict(row) for row in plan_rows],
         "prospects": len(visible_prospects),
         "documents": sum(1 for document in documents if document["prospect_id"] in visible_ids),
         "recent_prospects": visible_prospects,
