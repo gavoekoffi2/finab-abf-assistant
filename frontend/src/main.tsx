@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CheckCircle2, CreditCard, Crown, Download, FileText, Loader2, LogOut, RefreshCw, ShieldCheck, Sparkles, Trash2, UserPlus, Users } from 'lucide-react';
+import { CheckCircle2, CreditCard, Crown, Download, FileText, Loader2, LogOut, Pencil, RefreshCw, ShieldCheck, Sparkles, Trash2, UserPlus, Users, X } from 'lucide-react';
 import './styles.css';
 
 type FormState = {
@@ -81,6 +81,38 @@ function payloadFromForm(form: FormState) {
     goals: { short_term_goals: form.priorityProjects, long_term_goals: form.priorityProjects, family_need_if_death: form.priorityProjects, priority_projects: form.priorityProjects, acceptable_monthly_budget: numberValue(form.acceptableBudget), client_preference: form.acceptableBudget },
     health: { height: form.height, weight: form.weight, smoker: null, health_notes: '' },
     meeting: { availability: form.availability, preferred_mode: '', consent_acknowledged: true },
+  };
+}
+
+
+function formFromPayload(payload: any): FormState {
+  const contact = payload?.contact || {};
+  const address = [contact.address, contact.city, contact.province].filter(Boolean).join(', ');
+  return {
+    legalLastName: payload?.identity?.legal_last_name || '',
+    firstNames: payload?.identity?.first_names || '',
+    dateOfBirth: payload?.identity?.date_of_birth || '',
+    placeOfBirth: payload?.identity?.place_of_birth || '',
+    maritalStatus: payload?.identity?.marital_status || '',
+    dependents: String(payload?.identity?.dependents_count ?? ''),
+    arrivalInCanada: payload?.identity?.arrival_in_canada || '',
+    phone: contact.phone || '',
+    email: contact.email || '',
+    address,
+    postalCode: contact.postal_code || '',
+    occupation: payload?.employment?.occupation || '',
+    employerAddress: payload?.employment?.employer_address || '',
+    annualIncome: String(payload?.employment?.annual_income || ''),
+    totalAssets: String(payload?.financial?.total_assets || ''),
+    totalDebts: String(payload?.financial?.total_debts || ''),
+    hasExistingInsurance: payload?.insurance?.has_existing_life_insurance ? 'oui' : 'non',
+    existingInsuranceDetails: payload?.insurance?.existing_retirement_savings_note || '',
+    noInsuranceReason: payload?.insurance?.no_insurance_reason || '',
+    acceptableBudget: String(payload?.goals?.acceptable_monthly_budget || ''),
+    height: payload?.health?.height || '',
+    weight: payload?.health?.weight || '',
+    availability: payload?.meeting?.availability || '',
+    priorityProjects: payload?.goals?.priority_projects || '',
   };
 }
 
@@ -289,6 +321,8 @@ function AdvisorDashboard() {
   const [message, setMessage] = useState('');
   const [pdfPath, setPdfPath] = useState('');
   const [query, setQuery] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState<FormState>(emptyForm);
   const token = session?.token;
 
   async function refresh(selectId?: string) {
@@ -302,7 +336,12 @@ function AdvisorDashboard() {
   async function loadDetail(id: string) {
     if (!token) return;
     setLoading(true); setMessage(''); setPdfPath('');
-    try { setSelected(await api<ProspectDetail>(`/api/prospects/${id}`, undefined, token)); }
+    try {
+      const detail = await api<ProspectDetail>(`/api/prospects/${id}`, undefined, token);
+      setSelected(detail);
+      setEditForm(formFromPayload(detail.payload));
+      setEditing(false);
+    }
     catch { setMessage('Impossible de charger ce prospect.'); }
     finally { setLoading(false); }
   }
@@ -316,6 +355,27 @@ function AdvisorDashboard() {
       await refresh(selected.id);
     } catch { setMessage("Impossible de générer l'ABF pour ce prospect."); }
     finally { setLoading(false); }
+  }
+
+  async function saveProspectEdits() {
+    if (!selected || !token) return;
+    setLoading(true); setMessage(''); setPdfPath('');
+    try {
+      const updated = await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
+      setSelected(updated);
+      setEditForm(formFromPayload(updated.payload));
+      setEditing(false);
+      setMessage('Corrections enregistrées. Le prochain PDF ABF utilisera ces informations.');
+      await refresh(updated.id);
+    } catch { setMessage('Enregistrement impossible. Vérifiez les champs obligatoires.'); }
+    finally { setLoading(false); }
+  }
+
+  function startEditing() {
+    if (!selected?.payload) return;
+    setEditForm(formFromPayload(selected.payload));
+    setEditing(true);
+    setMessage('');
   }
   async function downloadPdf(path: string) {
     if (!token || !path) return;
@@ -379,15 +439,15 @@ function AdvisorDashboard() {
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfPath && <button className="inline-link" onClick={() => downloadPdf(pdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
-          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF ABF</button></section>
-          <div className="advisor-grid">
+          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading || editing} onClick={startEditing}><Pencil size={16}/> Modifier le formulaire</button><button className="submit-button" disabled={loading || editing} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF ABF</button></div></section>
+          {editing ? <EditableProspectForm form={editForm} setForm={setEditForm} loading={loading} onSave={saveProspectEdits} onCancel={() => { setEditForm(formFromPayload(p)); setEditing(false); }} /> : <div className="advisor-grid">
             <InfoCard title="Identité" rows={[[ 'Nom', p.identity?.legal_last_name ], [ 'Prénoms', p.identity?.first_names ], [ 'Date naissance', p.identity?.date_of_birth ], [ 'Lieu naissance', p.identity?.place_of_birth ], [ 'Statut', p.identity?.marital_status ], [ 'Enfants', p.identity?.dependents_count ], [ 'Arrivée Canada', p.identity?.arrival_in_canada ]]}/>
             <InfoCard title="Coordonnées" rows={[[ 'Téléphone', p.contact?.phone ], [ 'Courriel', p.contact?.email ], [ 'Adresse', [p.contact?.address, p.contact?.city, p.contact?.province, p.contact?.postal_code].filter(Boolean).join(', ') ]]}/>
             <InfoCard title="Emploi / revenus" rows={[[ 'Poste', p.employment?.occupation ], [ 'Adresse emploi', p.employment?.employer_address ], [ 'Revenu annuel', `$${money(p.employment?.annual_income)}` ]]}/>
             <InfoCard title="Finances" rows={[[ 'Total biens', `$${money(p.financial?.total_assets)}` ], [ 'Total dettes', `$${money(p.financial?.total_debts)}` ]]}/>
             <InfoCard title="Assurance / budget" rows={[[ 'Assurance existante', p.insurance?.has_existing_life_insurance ? 'Oui' : 'Non' ], [ 'Détails assurance / placements', p.insurance?.existing_retirement_savings_note ], [ 'Si non : raison', p.insurance?.no_insurance_reason ], [ 'Budget possible', `$${money(p.goals?.acceptable_monthly_budget)}` ]]}/>
             <InfoCard title="Santé / disponibilité / projets" rows={[[ 'Taille', p.health?.height ], [ 'Poids', p.health?.weight ], [ 'Disponibilité', p.meeting?.availability ], [ 'Projets prioritaires', p.goals?.priority_projects ]]}/>
-          </div>
+          </div>}
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
@@ -488,6 +548,41 @@ function AdminPanel({ session }: { session: AuthSession }) {
       </div>
     </section>
   );
+}
+
+
+function EditableProspectForm({ form, setForm, loading, onSave, onCancel }: { form: FormState; setForm: (form: FormState) => void; loading: boolean; onSave: () => void; onCancel: () => void }) {
+  const set = (key: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [key]: event.target.value });
+  const canSave = Boolean(form.legalLastName && form.firstNames && form.dateOfBirth && form.phone && form.email);
+  return <section className="advisor-card edit-prospect-card">
+    <div className="edit-prospect-head"><div><h2>Corriger le formulaire client</h2><p className="muted">Modifiez ici les informations avant de générer ou régénérer le PDF ABF.</p></div><div className="edit-actions"><button className="refresh-button" type="button" onClick={onCancel} disabled={loading}><X size={16}/> Annuler</button><button className="submit-button compact" type="button" onClick={onSave} disabled={loading || !canSave}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les corrections</button></div></div>
+    <div className="form-grid edit-form-grid">
+      <label>Nom de famille<input value={form.legalLastName} onChange={set('legalLastName')} /></label>
+      <label>Prénoms<input value={form.firstNames} onChange={set('firstNames')} /></label>
+      <label>Date de naissance<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
+      <label>Lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+      <label>Situation familiale<select value={form.maritalStatus} onChange={set('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
+      <label>Enfants à charge<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
+      <label>Date d'arrivée au Canada<input type="date" value={form.arrivalInCanada} onChange={set('arrivalInCanada')} /></label>
+      <label>Téléphone<input value={form.phone} onChange={set('phone')} /></label>
+      <label>Courriel<input value={form.email} onChange={set('email')} /></label>
+      <label className="span-2">Adresse de domicile<input value={form.address} onChange={set('address')} placeholder="Rue, ville, province" /></label>
+      <label>Code postal<input value={form.postalCode} onChange={set('postalCode')} /></label>
+      <label className="span-2">Emploi actuel, titre et poste<input value={form.occupation} onChange={set('occupation')} /></label>
+      <label className="span-2">Adresse emploi<input value={form.employerAddress} onChange={set('employerAddress')} /></label>
+      <label>Revenu annuel<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>
+      <label>Total des biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" /></label>
+      <label>Total des dettes<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" /></label>
+      <label>Assurance vie existante<select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
+      <label className="span-2">Détails assurance / placements<textarea value={form.existingInsuranceDetails} onChange={set('existingInsuranceDetails')} /></label>
+      <label className="span-2">Si non : raison<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
+      <label>Budget mensuel confortable<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" /></label>
+      <label>Taille<input value={form.height} onChange={set('height')} /></label>
+      <label>Poids<input value={form.weight} onChange={set('weight')} /></label>
+      <label className="span-2">Disponibilités<textarea value={form.availability} onChange={set('availability')} /></label>
+      <label className="span-2">Projets prioritaires<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
+    </div>
+  </section>;
 }
 
 function InfoCard({ title, rows }: { title: string; rows: Array<[string, any]> }) { return <section className="advisor-card"><h2>{title}</h2><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{safe(value)}</dd></div>)}</dl></section>; }

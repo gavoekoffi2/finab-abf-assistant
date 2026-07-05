@@ -264,3 +264,44 @@ def test_checkout_success_endpoint_syncs_access_immediately(monkeypatch) -> None
     prospects = client.get("/api/prospects", headers=headers)
     assert prospects.status_code == 200
 
+
+
+def test_owner_can_correct_prospect_before_pdf_generation() -> None:
+    client = TestClient(app)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "KOFFI.AKPOBI@MYGREATWAY.CA", "password": "Finab-ABF-2026!"},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    payload = {
+        "identity": {
+            "legal_last_name": "Initial",
+            "first_names": "Client",
+            "date_of_birth": "1990-01-01",
+            "marital_status": "célibataire",
+        },
+        "contact": {"phone": "5140000000", "email": "client@example.com", "address": "1 Rue A"},
+        "employment": {"occupation": "Employé", "annual_income": 40000},
+        "financial": {"total_assets": 10000, "total_debts": 2000},
+        "insurance": {"has_existing_life_insurance": False},
+        "goals": {"priority_projects": "Protection famille", "acceptable_monthly_budget": 150},
+        "health": {"height": "170 cm", "weight": "70 kg"},
+        "meeting": {"availability": "Soir", "consent_acknowledged": True},
+    }
+    created = client.post("/api/prospects", json=payload)
+    assert created.status_code == 200
+    prospect_id = created.json()["id"]
+
+    payload["identity"]["legal_last_name"] = "Corrigé"
+    payload["contact"]["phone"] = "4381112222"
+    payload["goals"]["acceptable_monthly_budget"] = 225
+    update = client.patch(f"/api/prospects/{prospect_id}", headers=headers, json=payload)
+    assert update.status_code == 200
+    data = update.json()
+    assert data["client_name"] == "Client Corrigé"
+    assert data["phone"] == "4381112222"
+    assert data["payload"]["goals"]["acceptable_monthly_budget"] == 225
+
+    detail = client.get(f"/api/prospects/{prospect_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["payload"]["identity"]["legal_last_name"] == "Corrigé"

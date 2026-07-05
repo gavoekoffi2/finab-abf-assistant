@@ -721,6 +721,40 @@ def prospect_submission(prospect_id: str, organization_id: str | None = None) ->
     return ProspectSubmission.model_validate(record["payload"])
 
 
+def update_prospect_payload(
+    prospect_id: str,
+    prospect: ProspectSubmission,
+    organization_id: str | None = None,
+) -> dict:
+    conn = connect()
+    if organization_id:
+        row = conn.execute(
+            "SELECT id FROM prospects WHERE id=? AND organization_id=?", (prospect_id, organization_id)
+        ).fetchone()
+    else:
+        row = conn.execute("SELECT id FROM prospects WHERE id=?", (prospect_id,)).fetchone()
+    if not row:
+        raise KeyError(prospect_id)
+    payload = prospect.model_dump(mode="json")
+    conn.execute(
+        """
+        UPDATE prospects
+        SET client_name=?, phone=?, email=?, payload_json=?, updated_at=?
+        WHERE id=?
+        """,
+        (
+            prospect.identity.full_name,
+            prospect.contact.phone,
+            prospect.contact.email,
+            json.dumps(payload, ensure_ascii=False),
+            now_iso(),
+            prospect_id,
+        ),
+    )
+    conn.commit()
+    return get_prospect(prospect_id, organization_id=organization_id)
+
+
 def update_status(prospect_id: str, status: str) -> None:
     conn = connect()
     conn.execute(

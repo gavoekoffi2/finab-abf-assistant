@@ -45,6 +45,7 @@ from .storage import (
     save_abf_document,
     set_stripe_customer,
     update_subscription_by_customer,
+    update_prospect_payload,
     update_subscription_by_user,
     update_user_by_owner,
 )
@@ -387,6 +388,17 @@ def prospect_detail(prospect_id: str, user: dict = Depends(current_paid_user)) -
     organization_id = None if user["role"] == "owner" else user["organization_id"]
     try:
         record = get_prospect(prospect_id, organization_id=organization_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prospect introuvable") from None
+    record["documents"] = list_documents(prospect_id, organization_id=organization_id)
+    return record
+
+
+@app.patch("/api/prospects/{prospect_id}")
+def update_prospect(prospect_id: str, payload: ProspectSubmission, user: dict = Depends(current_paid_user)) -> dict:
+    organization_id = None if user["role"] == "owner" else user["organization_id"]
+    try:
+        record = update_prospect_payload(prospect_id, payload, organization_id=organization_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Prospect introuvable") from None
     record["documents"] = list_documents(prospect_id, organization_id=organization_id)
