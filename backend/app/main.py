@@ -497,9 +497,11 @@ def pdf_page_image(path: str, page: int = 0, token: str | None = None) -> FileRe
     with fitz.open(p) as doc:
         if page < 0 or page >= doc.page_count:
             raise HTTPException(status_code=404, detail="Page PDF introuvable")
-        rendered = doc[page].get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)
-        image_path = OUTPUT_DIR / f"preview_{p.stem}_p{page}_{uuid4().hex[:8]}.png"
-        rendered.save(image_path)
+        cache_key = f"preview_{p.stem}_m{int(p.stat().st_mtime)}_p{page}.png"
+        image_path = OUTPUT_DIR / cache_key
+        if not image_path.exists():
+            rendered = doc[page].get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)
+            rendered.save(image_path)
     return FileResponse(image_path, media_type="image/png", filename=image_path.name, content_disposition_type="inline")
 
 

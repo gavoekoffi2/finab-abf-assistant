@@ -689,14 +689,16 @@ function PdfInlineEditor({ previewUrl, pdfPath, token, loading, onGenerate, onEx
       .catch(() => setPageCount(1));
   }, [pdfPath, token]);
 
-  const imageUrl = pdfPath && token ? `/api/pdf/page-image?path=${encodeURIComponent(pdfPath)}&page=${page}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(pdfPath)}` : '';
-  function addEdit(event: React.MouseEvent<HTMLDivElement>) {
+  const pageIndexes = Array.from({ length: pageCount }, (_, index) => index);
+  const imageUrlForPage = (pageIndex: number) => pdfPath && token ? `/api/pdf/page-image?path=${encodeURIComponent(pdfPath)}&page=${pageIndex}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(pdfPath)}` : '';
+  function addEdit(pageIndex: number, event: React.MouseEvent<HTMLDivElement>) {
     if (!pdfPath) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = (event.clientX - rect.left) / rect.width;
     const y = (event.clientY - rect.top) / rect.height;
-    setEdits([...edits, { page, x: Math.max(0, Math.min(0.95, x)), y: Math.max(0, Math.min(0.95, y)), text: 'Votre correction', size, cover }]);
-    setHint('Tapez la correction dans la zone bleue, puis cliquez sur “Exporter PDF modifié”.');
+    setPage(pageIndex);
+    setEdits([...edits, { page: pageIndex, x: Math.max(0, Math.min(0.95, x)), y: Math.max(0, Math.min(0.95, y)), text: 'Votre correction', size, cover }]);
+    setHint(`Correction ajoutée sur la page ${pageIndex + 1}. Tapez le nouveau texte puis cliquez sur “Exporter PDF modifié”.`);
   }
   function updateEdit(index: number, next: Partial<PdfTextEdit>) {
     setEdits(edits.map((edit, idx) => idx === index ? { ...edit, ...next } : edit));
@@ -704,7 +706,6 @@ function PdfInlineEditor({ previewUrl, pdfPath, token, loading, onGenerate, onEx
   function removeEdit(index: number) {
     setEdits(edits.filter((_, idx) => idx !== index));
   }
-  const currentPageEdits = edits.map((edit, index) => ({ edit, index })).filter(({ edit }) => edit.page === page);
   const exportableEdits = edits.filter((edit) => edit.text.trim());
 
   return <section className="advisor-card pdf-editor-card">
@@ -716,14 +717,24 @@ function PdfInlineEditor({ previewUrl, pdfPath, token, loading, onGenerate, onEx
     {previewUrl && <>
       <div className="pdf-editor-toolbar">
         <button type="button" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Page précédente</button>
-        <strong>Page {page + 1} / {pageCount}</strong>
+        <strong>Page sélectionnée {page + 1} / {pageCount}</strong>
         <button type="button" onClick={() => setPage(Math.min(pageCount - 1, page + 1))} disabled={page + 1 >= pageCount}>Page suivante</button>
+        <div className="pdf-page-jump" aria-label="Accès rapide aux pages PDF">{pageIndexes.map((pageIndex) => <button key={pageIndex} type="button" className={pageIndex === page ? 'active' : ''} onClick={() => setPage(pageIndex)}>P{pageIndex + 1}</button>)}</div>
         <label>Texte <select value={size} onChange={(event) => setSize(Number(event.target.value))}><option value="9">Petit</option><option value="11">Normal</option><option value="14">Grand</option><option value="18">Très grand</option></select></label>
         <label className="pdf-cover-toggle"><input type="checkbox" checked={cover} onChange={(event) => setCover(event.target.checked)} /> Masquer l’ancien texte</label>
         <button className="submit-button compact" type="button" disabled={loading || exportableEdits.length === 0} onClick={() => onExportEdits(pdfPath, exportableEdits)}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Exporter PDF modifié</button>
       </div>
-      <p className="pdf-helper">{hint} Les corrections ajoutées : {exportableEdits.length}. Vous pouvez changer de page avant d’exporter.</p>
-      <div className="pdf-canvas-shell"><div className="pdf-page-canvas" onClick={addEdit}>{imageUrl && <img src={imageUrl} alt={`Page ${page + 1} du PDF ABF`} />}{currentPageEdits.map(({ edit, index }) => <div className="pdf-edit-box" key={index} style={{ left: `${edit.x * 100}%`, top: `${edit.y * 100}%` }} onClick={(event) => event.stopPropagation()}><textarea value={edit.text} onChange={(event) => updateEdit(index, { text: event.target.value })} style={{ fontSize: edit.size }} autoFocus /><div><label><input type="checkbox" checked={edit.cover} onChange={(event) => updateEdit(index, { cover: event.target.checked })} /> Masquer</label><button type="button" onClick={() => removeEdit(index)}>Retirer</button></div></div>)}</div></div>
+      <p className="pdf-helper">{hint} Les {pageCount} pages du PDF sont affichées ci-dessous : faites défiler, choisissez une page, cliquez exactement à l’endroit à corriger, puis exportez. Corrections ajoutées : {exportableEdits.length}.</p>
+      <div className="pdf-canvas-shell all-pages">
+        {pageIndexes.map((pageIndex) => {
+          const pageEdits = edits.map((edit, index) => ({ edit, index })).filter(({ edit }) => edit.page === pageIndex);
+          const pageImageUrl = imageUrlForPage(pageIndex);
+          return <div className={pageIndex === page ? 'pdf-page-block selected' : 'pdf-page-block'} key={pageIndex}>
+            <div className="pdf-page-label"><strong>Page {pageIndex + 1}</strong><span>{pageEdits.length} correction(s)</span><button type="button" onClick={() => setPage(pageIndex)}>Sélectionner cette page</button></div>
+            <div className="pdf-page-canvas" onClick={(event) => addEdit(pageIndex, event)}>{pageImageUrl && <img src={pageImageUrl} alt={`Page ${pageIndex + 1} du PDF ABF`} loading="lazy" />}{pageEdits.map(({ edit, index }) => <div className="pdf-edit-box" key={index} style={{ left: `${edit.x * 100}%`, top: `${edit.y * 100}%` }} onClick={(event) => event.stopPropagation()}><textarea value={edit.text} onChange={(event) => updateEdit(index, { text: event.target.value })} style={{ fontSize: edit.size }} autoFocus={index === edits.length - 1} /><div><label><input type="checkbox" checked={edit.cover} onChange={(event) => updateEdit(index, { cover: event.target.checked })} /> Masquer</label><button type="button" onClick={() => removeEdit(index)}>Retirer</button></div></div>)}</div>
+          </div>;
+        })}
+      </div>
     </>}
   </section>;
 }
