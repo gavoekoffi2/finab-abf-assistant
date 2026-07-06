@@ -54,6 +54,7 @@ type ReviewState = {
   agent_notes: string;
 };
 type ProspectDetail = ProspectSummary & { payload: any; advisor_review?: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
+type PdfTextEdit = { page: number; x: number; y: number; text: string; size: number; cover: boolean };
 type AdminOverview = { organizations: number; users: number; active_users: number; admins?: number; unlimited_users?: number; prospects: number; documents: number; recent_prospects: ProspectSummary[]; plan_distribution?: Array<{ plan: string; subscription_status: string; c: number }> };
 type AdminUser = User & { organization: Organization };
 
@@ -431,8 +432,20 @@ function AdvisorDashboard() {
       const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       await refresh(selected.id);
       setPdfPath(result.output_path);
-      setMessage('ABF enregistré et PDF final généré. Pour corriger, utilisez les champs modifiables dans cet espace, puis régénérez le PDF final.');
+      setMessage('ABF enregistré et PDF final généré. Vous pouvez maintenant corriger visuellement le PDF dans l’éditeur intégré, puis exporter la version modifiée.');
     } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs ABF modifiables."); }
+    finally { setLoading(false); }
+  }
+
+  async function exportPdfEdits(path: string, edits: PdfTextEdit[]) {
+    if (!selected || !token || !path || edits.length === 0) return;
+    setLoading(true); setMessage('');
+    try {
+      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/pdf-edits`, { method: 'POST', body: JSON.stringify({ path, edits }) }, token);
+      await refresh(selected.id);
+      setPdfPath(result.output_path);
+      setMessage('PDF modifié enregistré. Le nouveau PDF est prêt à être vérifié ou téléchargé.');
+    } catch { setMessage('Impossible d’appliquer les modifications sur le PDF. Vérifiez le texte ajouté puis réessayez.'); }
     finally { setLoading(false); }
   }
 
@@ -551,7 +564,7 @@ function AdvisorDashboard() {
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
           <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer les corrections</button>{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}<button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF final</button></div></section>
-          <PdfInlineEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} loading={loading} onExport={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
+          <PdfInlineEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} onGenerate={generateAbf} onExportEdits={exportPdfEdits} onDownload={() => downloadPdf(latestPdfPath)} />
           <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
@@ -660,14 +673,58 @@ function pdfViewerUrl(path: string, token?: string) {
   return path && token ? `/abf/view?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}#zoom=page-width` : '';
 }
 
-function PdfInlineEditor({ previewUrl, pdfPath, loading, onExport, onDownload }: { previewUrl: string; pdfPath: string; loading: boolean; onExport: () => void; onDownload: () => void }) {
+function PdfInlineEditor({ previewUrl, pdfPath, token, loading, onGenerate, onExportEdits, onDownload }: { previewUrl: string; pdfPath: string; token: string; loading: boolean; onGenerate: () => void; onExportEdits: (path: string, edits: PdfTextEdit[]) => void; onDownload: () => void }) {
+  const [pageCount, setPageCount] = useState(1);
+  const [page, setPage] = useState(0);
+  const [edits, setEdits] = useState<PdfTextEdit[]>([]);
+  const [cover, setCover] = useState(true);
+  const [size, setSize] = useState(11);
+  const [hint, setHint] = useState('Cliquez sur le PDF pour ajouter une correction.');
+
+  useEffect(() => {
+    setEdits([]); setPage(0); setHint('Cliquez sur le PDF pour ajouter une correction.');
+    if (!pdfPath || !token) return;
+    api<{ page_count: number }>(`/api/pdf/info?path=${encodeURIComponent(pdfPath)}`, undefined, token)
+      .then((info) => setPageCount(Math.max(info.page_count || 1, 1)))
+      .catch(() => setPageCount(1));
+  }, [pdfPath, token]);
+
+  const imageUrl = pdfPath && token ? `/api/pdf/page-image?path=${encodeURIComponent(pdfPath)}&page=${page}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(pdfPath)}` : '';
+  function addEdit(event: React.MouseEvent<HTMLDivElement>) {
+    if (!pdfPath) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+    setEdits([...edits, { page, x: Math.max(0, Math.min(0.95, x)), y: Math.max(0, Math.min(0.95, y)), text: 'Votre correction', size, cover }]);
+    setHint('Tapez la correction dans la zone bleue, puis cliquez sur “Exporter PDF modifié”.');
+  }
+  function updateEdit(index: number, next: Partial<PdfTextEdit>) {
+    setEdits(edits.map((edit, idx) => idx === index ? { ...edit, ...next } : edit));
+  }
+  function removeEdit(index: number) {
+    setEdits(edits.filter((_, idx) => idx !== index));
+  }
+  const currentPageEdits = edits.map((edit, index) => ({ edit, index })).filter(({ edit }) => edit.page === page);
+  const exportableEdits = edits.filter((edit) => edit.text.trim());
+
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
-      <div><p className="eyebrow">PDF ABF final</p><h2>Aperçu du PDF généré</h2><p>Le navigateur peut afficher des codes ou erreurs quand on tente de modifier directement le fichier PDF. Pour corriger sans blocage, modifiez les champs ABF dans l’espace conseiller juste en dessous, puis générez à nouveau le PDF final.</p></div>
-      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer / mettre à jour PDF</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger le PDF</button>}</div>
+      <div><p className="eyebrow">Éditeur PDF intégré</p><h2>Modifier directement le PDF dans l’espace conseiller</h2><p>Le PDF est transformé en page éditable ici. Cliquez sur l’endroit à corriger, tapez le nouveau texte, puis exportez la version modifiée sans ouvrir un autre logiciel.</p></div>
+      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer / mettre à jour PDF</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir original</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
     </div>
     {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF final généré pour ce dossier.</strong><span>Remplissez ou corrigez les champs ABF ci-dessous, puis cliquez sur “Générer le PDF final”.</span></div>}
-    {previewUrl && <><div className="pdf-frame-shell"><object className="pdf-frame" data={previewUrl} type="application/pdf"><iframe className="pdf-frame" src={previewUrl} title="PDF ABF final" /></object></div><p className="pdf-helper">Cet affichage sert à vérifier le rendu final. Les modifications se font dans le formulaire ABF de l’espace conseiller, pas dans l’onglet PDF.</p></>}
+    {previewUrl && <>
+      <div className="pdf-editor-toolbar">
+        <button type="button" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Page précédente</button>
+        <strong>Page {page + 1} / {pageCount}</strong>
+        <button type="button" onClick={() => setPage(Math.min(pageCount - 1, page + 1))} disabled={page + 1 >= pageCount}>Page suivante</button>
+        <label>Texte <select value={size} onChange={(event) => setSize(Number(event.target.value))}><option value="9">Petit</option><option value="11">Normal</option><option value="14">Grand</option><option value="18">Très grand</option></select></label>
+        <label className="pdf-cover-toggle"><input type="checkbox" checked={cover} onChange={(event) => setCover(event.target.checked)} /> Masquer l’ancien texte</label>
+        <button className="submit-button compact" type="button" disabled={loading || exportableEdits.length === 0} onClick={() => onExportEdits(pdfPath, exportableEdits)}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Exporter PDF modifié</button>
+      </div>
+      <p className="pdf-helper">{hint} Les corrections ajoutées : {exportableEdits.length}. Vous pouvez changer de page avant d’exporter.</p>
+      <div className="pdf-canvas-shell"><div className="pdf-page-canvas" onClick={addEdit}>{imageUrl && <img src={imageUrl} alt={`Page ${page + 1} du PDF ABF`} />}{currentPageEdits.map(({ edit, index }) => <div className="pdf-edit-box" key={index} style={{ left: `${edit.x * 100}%`, top: `${edit.y * 100}%` }} onClick={(event) => event.stopPropagation()}><textarea value={edit.text} onChange={(event) => updateEdit(index, { text: event.target.value })} style={{ fontSize: edit.size }} autoFocus /><div><label><input type="checkbox" checked={edit.cover} onChange={(event) => updateEdit(index, { cover: event.target.checked })} /> Masquer</label><button type="button" onClick={() => removeEdit(index)}>Retirer</button></div></div>)}</div></div>
+    </>}
   </section>;
 }
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi.testclient import TestClient
+import fitz
 import pytest
 
 from app import storage
@@ -371,3 +373,43 @@ def test_owner_can_save_advisor_review_used_for_pdf_generation(monkeypatch) -> N
     assert generated.status_code == 200
     assert captured["review"].final_recommended_coverage == 350000
     assert captured["review"].recommendation_1_notes == "Correction produit 1"
+
+
+def test_owner_can_apply_visual_pdf_text_edits() -> None:
+    client = TestClient(app)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "KOFFI.AKPOBI@MYGREATWAY.CA", "password": "Finab-ABF-2026!"},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    payload = {
+        "identity": {"legal_last_name": "PDF", "first_names": "Client", "date_of_birth": "1990-01-01", "marital_status": "célibataire"},
+        "contact": {"phone": "5140000000", "email": "client-pdf@example.com", "address": "1 Rue A"},
+        "employment": {"occupation": "Employé", "annual_income": 40000},
+        "financial": {"total_assets": 10000, "total_debts": 2000},
+        "insurance": {"has_existing_life_insurance": False},
+        "goals": {"priority_projects": "Protection famille", "acceptable_monthly_budget": 150},
+        "meeting": {"availability": "Soir", "consent_acknowledged": True},
+    }
+    created = client.post("/api/prospects", json=payload)
+    prospect_id = created.json()["id"]
+    generated = client.post(f"/api/prospects/{prospect_id}/generate-abf", headers=headers, json={})
+    assert generated.status_code == 200
+    source_path = generated.json()["output_path"]
+
+    info = client.get(f"/api/pdf/info?path={source_path}", headers=headers)
+    assert info.status_code == 200
+    assert info.json()["page_count"] >= 1
+
+    edited = client.post(
+        f"/api/prospects/{prospect_id}/pdf-edits",
+        headers=headers,
+        json={"path": source_path, "edits": [{"page": 0, "x": 0.12, "y": 0.12, "text": "Correction visuelle ABF", "size": 12, "cover": True}]},
+    )
+    assert edited.status_code == 200
+    output_path = edited.json()["output_path"]
+    assert output_path != source_path
+    assert Path(output_path).exists()
+
+    doc = fitz.open(output_path)
+    assert "Correction visuelle ABF" in doc[0].get_text()

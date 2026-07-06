@@ -9,6 +9,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from .abf_mapping import build_abf_values
 from .pdf_fill import fill_acroform
@@ -61,6 +62,20 @@ app = FastAPI(title="Finab ABF Flow", version="0.3.0")
 
 PLAN_PRICE_USD = 199
 TRIAL_DAYS = 3
+
+
+class PdfTextEdit(BaseModel):
+    page: int = Field(ge=0)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    text: str = Field(min_length=1, max_length=600)
+    size: int = Field(default=11, ge=7, le=30)
+    cover: bool = True
+
+
+class PdfEditRequest(BaseModel):
+    path: str
+    edits: list[PdfTextEdit]
 
 
 def public_base_url() -> str:
@@ -130,6 +145,14 @@ def _user_from_token(token: str | None) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="Session expirée ou invalide")
     return user
+
+
+def _resolve_output_pdf(path: str) -> Path:
+    p = Path(path).resolve()
+    output_root = OUTPUT_DIR.resolve()
+    if output_root not in p.parents or not p.exists() or p.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="PDF introuvable")
+    return p
 
 
 def current_user(authorization: str | None = Header(default=None)) -> dict:
@@ -454,6 +477,90 @@ def generate_prospect_abf(
     return result
 
 
+@app.get("/api/pdf/info")
+def pdf_info(path: str, user: dict = Depends(current_paid_user)) -> dict:
+    p = _resolve_output_pdf(path)
+    import fitz
+
+    with fitz.open(p) as doc:
+        return {"page_count": doc.page_count, "filename": p.name}
+
+
+@app.get("/api/pdf/page-image")
+def pdf_page_image(path: str, page: int = 0, token: str | None = None) -> FileResponse:
+    user = _user_from_token(token)
+    if not (user.get("role") == "owner" or user.get("subscription", {}).get("has_access")):
+        raise HTTPException(status_code=402, detail="Abonnement requis pour accéder à FINAB ABF Flow")
+    p = _resolve_output_pdf(path)
+    import fitz
+
+    with fitz.open(p) as doc:
+        if page < 0 or page >= doc.page_count:
+            raise HTTPException(status_code=404, detail="Page PDF introuvable")
+        rendered = doc[page].get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)
+        image_path = OUTPUT_DIR / f"preview_{p.stem}_p{page}_{uuid4().hex[:8]}.png"
+        rendered.save(image_path)
+    return FileResponse(image_path, media_type="image/png", filename=image_path.name, content_disposition_type="inline")
+
+
+@app.post("/api/prospects/{prospect_id}/pdf-edits", response_model=AbfGenerationResult)
+def apply_pdf_edits(prospect_id: str, request: PdfEditRequest, user: dict = Depends(current_paid_user)) -> AbfGenerationResult:
+    organization_id = None if user["role"] == "owner" else user["organization_id"]
+    try:
+        prospect_record = get_prospect(prospect_id, organization_id=organization_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prospect introuvable") from None
+    source = _resolve_output_pdf(request.path)
+    if not request.edits:
+        raise HTTPException(status_code=400, detail="Aucune modification PDF à appliquer")
+
+    import fitz
+
+    output = OUTPUT_DIR / f"{source.stem}_modifie_{uuid4().hex[:8]}.pdf"
+    with fitz.open(source) as doc:
+        page_count = doc.page_count
+        for edit in request.edits:
+            if edit.page >= doc.page_count:
+                continue
+            page = doc[edit.page]
+            rect = page.rect
+            x = rect.x0 + edit.x * rect.width
+            y = rect.y0 + edit.y * rect.height
+            text = edit.text.strip()
+            if not text:
+                continue
+            box_width = min(max(len(text) * edit.size * 0.58, 70), rect.width - x - 12)
+            lines = max(text.count("\n") + 1, 1)
+            box_height = max(edit.size * 1.55 * lines, edit.size + 8)
+            target = fitz.Rect(x, y, min(x + box_width + 10, rect.x1 - 8), min(y + box_height + 8, rect.y1 - 8))
+            if edit.cover:
+                page.draw_rect(target, color=(1, 1, 1), fill=(1, 1, 1), overlay=True)
+            page.insert_textbox(
+                target,
+                text,
+                fontsize=edit.size,
+                fontname="helv",
+                color=(0.02, 0.08, 0.16),
+                align=fitz.TEXT_ALIGN_LEFT,
+                overlay=True,
+            )
+        doc.save(output, garbage=4, deflate=True)
+
+    report = {
+        "pages_before": page_count,
+        "pages_after": page_count,
+        "is_form_pdf_before": True,
+        "is_form_pdf_after": True,
+        "filled_widget_updates": len([edit for edit in request.edits if edit.text.strip()]),
+        "missing_fields": [],
+        "layout_preserved": True,
+    }
+    target_organization_id = prospect_record.get("organization_id") or user["organization_id"]
+    result = AbfGenerationResult(output_path=str(output), **report)
+    save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
+    return result
+
+
 @app.post("/abf/generate", response_model=AbfGenerationResult)
 def generate_abf(request: AbfGenerationRequest) -> AbfGenerationResult:
     if not request.review.reviewed_by_advisor and not request.allow_draft_watermark:
@@ -474,9 +581,7 @@ def _generate_abf(request: AbfGenerationRequest) -> AbfGenerationResult:
 
 @app.get("/abf/download")
 def download(path: str, user: dict = Depends(current_paid_user)) -> FileResponse:
-    p = Path(path).resolve()
-    if OUTPUT_DIR.resolve() not in p.parents or not p.exists():
-        raise HTTPException(status_code=404, detail="PDF introuvable")
+    p = _resolve_output_pdf(path)
     # The path itself is only revealed by protected prospect/document endpoints.
     return FileResponse(p, media_type="application/pdf", filename=p.name)
 
@@ -486,9 +591,7 @@ def view_pdf(path: str, token: str | None = None) -> FileResponse:
     user = _user_from_token(token)
     if not (user.get("role") == "owner" or user.get("subscription", {}).get("has_access")):
         raise HTTPException(status_code=402, detail="Abonnement requis pour accéder à FINAB ABF Flow")
-    p = Path(path).resolve()
-    if OUTPUT_DIR.resolve() not in p.parents or not p.exists():
-        raise HTTPException(status_code=404, detail="PDF introuvable")
+    p = _resolve_output_pdf(path)
     # Native browser PDF viewers cannot send Authorization headers from an iframe.
     # This protected query-token endpoint lets the advisor see and fill the actual
     # generated AcroForm PDF directly in the workspace instead of only downloading it.
