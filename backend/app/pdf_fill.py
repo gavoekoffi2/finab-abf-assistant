@@ -20,7 +20,14 @@ def fill_acroform(template: Path, output: Path, values: Mapping[str, str]) -> di
         for widget in page.widgets() or []:
             name = widget.field_name
             available.add(name)
+            if widget.field_type_string in {"Text", "ComboBox"}:
+                # Keep every generated AcroForm widget editable in the
+                # browser/PDF reader, including fields that are not populated by
+                # the server but may need a counselor correction later.
+                widget.field_flags = int(widget.field_flags or 0) & ~1
             if name not in values:
+                if widget.field_type_string in {"Text", "ComboBox"}:
+                    widget.update()
                 continue
             if widget.field_type_string not in {"Text", "ComboBox"}:
                 continue

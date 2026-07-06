@@ -659,11 +659,11 @@ function AdminPanel({ session }: { session: AuthSession }) {
 function PdfInlineEditor({ previewUrl, pdfPath, loading, onExport, onDownload }: { previewUrl: string; pdfPath: string; loading: boolean; onExport: () => void; onDownload: () => void }) {
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
-      <div><p className="eyebrow">PDF final</p><h2>Exporter après vos corrections</h2><p>Sur téléphone, le PDF natif s’ouvre souvent dans un lecteur externe non modifiable. Les corrections se font donc dans le document ABF affiché au-dessus, directement dans l’espace conseiller. Ensuite, exportez le PDF final.</p></div>
-      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Exporter / régénérer PDF</button>{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger le PDF final</button>}</div>
+      <div><p className="eyebrow">PDF modifiable dans l’espace conseiller</p><h2>Modifier directement le PDF</h2><p>Après l’export, le vrai PDF ABF s’affiche ici. Cliquez directement dans les champs du PDF pour corriger, puis utilisez le bouton de téléchargement du lecteur PDF ou le bouton ci-dessous pour récupérer le document.</p></div>
+      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Exporter / régénérer PDF</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Ouvrir le PDF</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger le PDF</button>}</div>
     </div>
-    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF final généré.</strong><span>Corrigez les champs dans l’ABF visible au-dessus, puis cliquez sur “Exporter PDF ABF”.</span></div>}
-    {previewUrl && <div className="pdf-ready-state"><FileText size={34}/><div><strong>PDF final prêt.</strong><span>Le document final est disponible en téléchargement. Pour modifier, revenez aux champs ABF au-dessus, puis régénérez le PDF.</span></div></div>}
+    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF généré pour ce dossier.</strong><span>Cliquez sur “Exporter PDF ABF” : le système remplira le document, puis le PDF modifiable apparaîtra ici dans l’espace conseiller.</span></div>}
+    {previewUrl && <><div className="pdf-frame-shell"><iframe className="pdf-frame" src={previewUrl} title="PDF ABF modifiable" /></div><p className="pdf-helper">Important : si votre téléphone ouvre le PDF dans une application externe, utilisez “Ouvrir le PDF”. Sur ordinateur, les champs du PDF se modifient directement dans cette zone.</p></>}
   </section>;
 }
 
