@@ -543,17 +543,17 @@ function AdvisorDashboard() {
         </section>
         <section className="advisor-workflow-strip">
           <div><CheckCircle2 size={18}/><span>1. Recevoir le formulaire</span></div>
-          <div><FileText size={18}/><span>2. Modifier l’ABF directement sur la page</span></div>
-          <div><Download size={18}/><span>3. Enregistrer, exporter et télécharger</span></div>
+          <div><Pencil size={18}/><span>2. Corriger dans l’espace, même sur téléphone</span></div>
+          <div><Download size={18}/><span>3. Exporter le PDF final</span></div>
         </section>
         {canAdminister && <AdminPanel session={session} />}
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{latestPdfPath && <button className="inline-link" onClick={() => downloadPdf(latestPdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
           <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer l’ABF</button><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Exporter PDF ABF</button></div></section>
-          <PdfInlineEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} loading={loading} onExport={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
           <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
-          <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
+          <PdfInlineEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} loading={loading} onExport={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
+          <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
     </main>
@@ -659,12 +659,11 @@ function AdminPanel({ session }: { session: AuthSession }) {
 function PdfInlineEditor({ previewUrl, pdfPath, loading, onExport, onDownload }: { previewUrl: string; pdfPath: string; loading: boolean; onExport: () => void; onDownload: () => void }) {
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
-      <div><p className="eyebrow">PDF ABF modifiable</p><h2>Modifier directement sur le PDF généré</h2><p>Après génération, le vrai formulaire PDF FINAB s’affiche ici dans l’espace conseiller. Les champs du PDF restent remplissables directement dans le lecteur PDF du navigateur.</p></div>
-      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Régénérer le PDF</button>{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
+      <div><p className="eyebrow">PDF final</p><h2>Exporter après vos corrections</h2><p>Sur téléphone, le PDF natif s’ouvre souvent dans un lecteur externe non modifiable. Les corrections se font donc dans le document ABF affiché au-dessus, directement dans l’espace conseiller. Ensuite, exportez le PDF final.</p></div>
+      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Exporter / régénérer PDF</button>{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger le PDF final</button>}</div>
     </div>
-    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF affiché pour ce dossier.</strong><span>Cliquez sur “Exporter PDF ABF” pour générer le formulaire, puis il apparaîtra directement ici pour correction.</span></div>}
-    {previewUrl && <div className="pdf-frame-shell"><iframe title="PDF ABF modifiable" className="pdf-frame" src={previewUrl} /></div>}
-    {previewUrl && <p className="pdf-helper">Astuce : cliquez dans les champs du PDF affiché pour corriger le document. Si votre téléphone n’autorise pas l’édition intégrée, utilisez “Télécharger” ou ouvrez le PDF dans le lecteur PDF du navigateur.</p>}
+    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF final généré.</strong><span>Corrigez les champs dans l’ABF visible au-dessus, puis cliquez sur “Exporter PDF ABF”.</span></div>}
+    {previewUrl && <div className="pdf-ready-state"><FileText size={34}/><div><strong>PDF final prêt.</strong><span>Le document final est disponible en téléchargement. Pour modifier, revenez aux champs ABF au-dessus, puis régénérez le PDF.</span></div></div>}
   </section>;
 }
 
@@ -676,7 +675,7 @@ function EditableAbfPreview({ form, setForm, review, setReview, loading, onSave,
   const displayedCoverage = numberValue(review.final_recommended_coverage) || automaticCoverage;
   return <section className="advisor-card abf-editor-card">
     <div className="abf-editor-head">
-      <div><p className="eyebrow">ABF visible et modifiable</p><h2>Analyse de besoins financiers</h2><p>Le conseiller corrige directement les champs de l’ABF ici, puis enregistre ou exporte le PDF final.</p></div>
+      <div><p className="eyebrow">ABF visible et modifiable dans l’espace</p><h2>Formulaire ABF à corriger ici</h2><p>Tapez directement dans les champs ci-dessous, même sur téléphone. Aucun clic sur un lien PDF n’est nécessaire pour modifier le dossier.</p></div>
       <div className="edit-actions"><button className="refresh-button" type="button" disabled={loading} onClick={onSave}><CheckCircle2 size={16}/> Enregistrer</button><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Exporter PDF</button></div>
     </div>
     <div className="abf-paper">

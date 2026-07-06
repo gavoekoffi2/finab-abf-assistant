@@ -53,8 +53,8 @@ input,textarea,select{width:100%;border:1px solid #d4dfec;border-radius:16px;pad
 .pdf-editor-head p{margin:0;color:#64748b;line-height:1.55;max-width:760px}
 .pdf-frame-shell{border:1px solid #cbd5e1;background:#0f172a;border-radius:18px;overflow:hidden;box-shadow:0 20px 55px rgba(15,42,68,.16)}
 .pdf-frame{display:block;width:100%;height:78vh;min-height:720px;border:0;background:#334155}
-.pdf-empty-state{min-height:230px;border:1px dashed #cbd5e1;border-radius:18px;background:#f8fafc;color:#475569;display:grid;place-items:center;text-align:center;gap:8px;padding:28px;font-weight:850}
-.pdf-empty-state svg{color:#0f2a44}.pdf-empty-state strong{display:block;color:#0f2a44;font-size:19px}.pdf-empty-state span{max-width:560px;line-height:1.5}
+.pdf-empty-state,.pdf-ready-state{min-height:170px;border:1px dashed #cbd5e1;border-radius:18px;background:#f8fafc;color:#475569;display:flex;align-items:center;justify-content:center;text-align:left;gap:14px;padding:24px;font-weight:850}
+.pdf-empty-state{display:grid;place-items:center;text-align:center}.pdf-empty-state svg,.pdf-ready-state svg{color:#0f2a44;flex:0 0 auto}.pdf-empty-state strong,.pdf-ready-state strong{display:block;color:#0f2a44;font-size:19px}.pdf-empty-state span,.pdf-ready-state span{display:block;max-width:620px;line-height:1.5}
 .pdf-helper{margin:12px 0 0;color:#475569;font-weight:800;line-height:1.55;background:#fff8df;border:1px solid #f0d780;border-radius:14px;padding:12px 14px}
 .inline-link{border:0;background:#065f46;color:white;border-radius:999px;padding:8px 12px;font-weight:950;cursor:pointer;margin-left:auto}
 @media(max-width:760px){.pdf-editor-head{display:grid}.pdf-frame{height:72vh;min-height:520px}.pdf-editor-head .edit-actions{width:100%}.inline-link{width:100%;margin-left:0}}
