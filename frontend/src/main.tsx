@@ -426,12 +426,30 @@ function AdvisorDashboard() {
     if (!selected || !token) return;
     setLoading(true); setMessage(''); setPdfPath('');
     try {
+      await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
       await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       setPdfPath(result.output_path);
-      setMessage('Corrections conseiller enregistrées et document ABF généré avec succès.');
+      setMessage('ABF enregistré, généré et prêt à télécharger avec les corrections visibles sur la page.');
       await refresh(selected.id);
-    } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les corrections conseiller."); }
+    } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs ABF modifiables."); }
+    finally { setLoading(false); }
+  }
+
+  async function saveAbfPageEdits() {
+    if (!selected || !token) return;
+    setLoading(true); setMessage(''); setPdfPath('');
+    try {
+      const updatedProspect = await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
+      const updatedReview = await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
+      const merged = { ...updatedProspect, advisor_review: updatedReview.advisor_review, documents: updatedReview.documents || updatedProspect.documents };
+      setSelected(merged);
+      setEditForm(formFromPayload(merged.payload));
+      setReviewForm(reviewFromDetail(merged, session));
+      setEditing(false);
+      setMessage('Corrections enregistrées. Le prochain PDF ABF reprendra exactement ces champs.');
+      await refresh(merged.id);
+    } catch { setMessage('Enregistrement impossible. Vérifiez les champs obligatoires.'); }
     finally { setLoading(false); }
   }
 
@@ -523,23 +541,15 @@ function AdvisorDashboard() {
         </section>
         <section className="advisor-workflow-strip">
           <div><CheckCircle2 size={18}/><span>1. Recevoir le formulaire</span></div>
-          <div><FileText size={18}/><span>2. Vérifier les informations</span></div>
-          <div><Download size={18}/><span>3. Générer et télécharger l’ABF</span></div>
+          <div><FileText size={18}/><span>2. Modifier l’ABF directement sur la page</span></div>
+          <div><Download size={18}/><span>3. Enregistrer, exporter et télécharger</span></div>
         </section>
         {canAdminister && <AdminPanel session={session} />}
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfPath && <button className="inline-link" onClick={() => downloadPdf(pdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
-          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading || editing} onClick={startEditing}><Pencil size={16}/> Modifier le formulaire</button><button className="submit-button" disabled={loading || editing} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF ABF</button></div></section>
-          {editing ? <EditableProspectForm form={editForm} setForm={setEditForm} loading={loading} onSave={saveProspectEdits} onCancel={() => { setEditForm(formFromPayload(p)); setEditing(false); }} /> : <div className="advisor-grid">
-            <InfoCard title="Identité" rows={[[ 'Nom', p.identity?.legal_last_name ], [ 'Prénoms', p.identity?.first_names ], [ 'Date naissance', p.identity?.date_of_birth ], [ 'Lieu naissance', p.identity?.place_of_birth ], [ 'Statut', p.identity?.marital_status ], [ 'Enfants', p.identity?.dependents_count ], [ 'Arrivée Canada', p.identity?.arrival_in_canada ]]}/>
-            <InfoCard title="Coordonnées" rows={[[ 'Téléphone', p.contact?.phone ], [ 'Courriel', p.contact?.email ], [ 'Adresse', [p.contact?.address, p.contact?.city, p.contact?.province, p.contact?.postal_code].filter(Boolean).join(', ') ]]}/>
-            <InfoCard title="Emploi / revenus" rows={[[ 'Poste', p.employment?.occupation ], [ 'Adresse emploi', p.employment?.employer_address ], [ 'Revenu annuel', `$${money(p.employment?.annual_income)}` ]]}/>
-            <InfoCard title="Finances" rows={[[ 'Total biens', `$${money(p.financial?.total_assets)}` ], [ 'Total dettes', `$${money(p.financial?.total_debts)}` ]]}/>
-            <InfoCard title="Assurance / budget" rows={[[ 'Assurance existante', p.insurance?.has_existing_life_insurance ? 'Oui' : 'Non' ], [ 'Détails assurance / placements', p.insurance?.existing_retirement_savings_note ], [ 'Si non : raison', p.insurance?.no_insurance_reason ], [ 'Budget possible', `$${money(p.goals?.acceptable_monthly_budget)}` ]]}/>
-            <InfoCard title="Santé / disponibilité / projets" rows={[[ 'Taille', p.health?.height ], [ 'Poids', p.health?.weight ], [ 'Disponibilité', p.meeting?.availability ], [ 'Projets prioritaires', p.goals?.priority_projects ]]}/>
-          </div>}
-          <AdvisorReviewForm form={reviewForm} setForm={setReviewForm} loading={loading} onSave={saveAdvisorReview} />
+          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer l’ABF</button><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Exporter PDF ABF</button></div></section>
+          <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
@@ -642,6 +652,80 @@ function AdminPanel({ session }: { session: AuthSession }) {
   );
 }
 
+
+function EditableAbfPreview({ form, setForm, review, setReview, loading, onSave, onExport }: { form: FormState; setForm: (form: FormState) => void; review: ReviewState; setReview: (form: ReviewState) => void; loading: boolean; onSave: () => void; onExport: () => void }) {
+  const setClient = (key: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [key]: event.target.value });
+  const setAdvisor = (key: keyof ReviewState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setReview({ ...review, [key]: event.target.value });
+  const automaticCoverage = Math.max((numberValue(form.annualIncome) * numberValue(review.replacement_years)) - numberValue(form.totalAssets) + numberValue(form.totalDebts), 0);
+  const displayedCoverage = numberValue(review.final_recommended_coverage) || automaticCoverage;
+  return <section className="advisor-card abf-editor-card">
+    <div className="abf-editor-head">
+      <div><p className="eyebrow">ABF visible et modifiable</p><h2>Analyse de besoins financiers</h2><p>Le conseiller corrige directement les champs de l’ABF ici, puis enregistre ou exporte le PDF final.</p></div>
+      <div className="edit-actions"><button className="refresh-button" type="button" disabled={loading} onClick={onSave}><CheckCircle2 size={16}/> Enregistrer</button><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Exporter PDF</button></div>
+    </div>
+    <div className="abf-paper">
+      <div className="abf-paper-title"><div><span>FINAB Solution</span><strong>ABF — Dossier client</strong></div><small>Document de travail conseiller</small></div>
+      <div className="abf-band">1. Identification du client</div>
+      <div className="abf-fields three">
+        <AbfField label="Nom" value={form.legalLastName} onChange={setClient('legalLastName')} />
+        <AbfField label="Prénoms" value={form.firstNames} onChange={setClient('firstNames')} />
+        <AbfField label="Date de naissance" value={form.dateOfBirth} onChange={setClient('dateOfBirth')} type="date" />
+        <AbfField label="Lieu de naissance" value={form.placeOfBirth} onChange={setClient('placeOfBirth')} />
+        <label className="abf-field"><span>Situation familiale</span><select value={form.maritalStatus} onChange={setClient('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
+        <AbfField label="Enfants à charge" value={form.dependents} onChange={setClient('dependents')} inputMode="numeric" />
+        <AbfField label="Arrivée au Canada" value={form.arrivalInCanada} onChange={setClient('arrivalInCanada')} type="date" />
+        <AbfField label="Téléphone" value={form.phone} onChange={setClient('phone')} />
+        <AbfField label="Courriel" value={form.email} onChange={setClient('email')} />
+      </div>
+      <AbfArea label="Adresse complète" value={form.address} onChange={setClient('address')} />
+      <div className="abf-band">2. Emploi, revenus et situation financière</div>
+      <div className="abf-fields two">
+        <AbfField label="Emploi / titre / poste" value={form.occupation} onChange={setClient('occupation')} />
+        <AbfField label="Adresse emploi" value={form.employerAddress} onChange={setClient('employerAddress')} />
+        <AbfField label="Revenu annuel" value={form.annualIncome} onChange={setClient('annualIncome')} inputMode="decimal" />
+        <AbfField label="Valeur totale des biens" value={form.totalAssets} onChange={setClient('totalAssets')} inputMode="decimal" />
+        <AbfField label="Total des dettes" value={form.totalDebts} onChange={setClient('totalDebts')} inputMode="decimal" />
+        <AbfField label="Budget mensuel confortable" value={form.acceptableBudget} onChange={setClient('acceptableBudget')} inputMode="decimal" />
+      </div>
+      <div className="abf-band">3. Assurance, santé et objectifs</div>
+      <div className="abf-fields two">
+        <label className="abf-field"><span>Assurance vie existante</span><select value={form.hasExistingInsurance} onChange={setClient('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
+        <AbfField label="Taille" value={form.height} onChange={setClient('height')} />
+        <AbfField label="Poids" value={form.weight} onChange={setClient('weight')} />
+        <AbfField label="Code postal" value={form.postalCode} onChange={setClient('postalCode')} />
+      </div>
+      <AbfArea label="Détails assurances / placements actuels" value={form.existingInsuranceDetails} onChange={setClient('existingInsuranceDetails')} />
+      <AbfArea label="Si aucune assurance : raison" value={form.noInsuranceReason} onChange={setClient('noInsuranceReason')} />
+      <AbfArea label="Disponibilités" value={form.availability} onChange={setClient('availability')} />
+      <AbfArea label="Projets prioritaires / besoins familiaux" value={form.priorityProjects} onChange={setClient('priorityProjects')} />
+      <div className="abf-band">4. Recommandation du conseiller</div>
+      <div className="abf-calculation-strip"><div><span>Couverture calculée</span><strong>{money(displayedCoverage)} $</strong></div><div><span>Années de revenu</span><strong>{review.replacement_years || '0'}</strong></div><div><span>Budget client</span><strong>{money(form.acceptableBudget)} $/mois</strong></div></div>
+      <div className="abf-fields three">
+        <AbfField label="Conseiller" value={review.advisor_name} onChange={setAdvisor('advisor_name')} />
+        <AbfField label="Téléphone conseiller" value={review.advisor_phone} onChange={setAdvisor('advisor_phone')} />
+        <AbfField label="Courriel conseiller" value={review.advisor_email} onChange={setAdvisor('advisor_email')} />
+        <AbfField label="Date validation" value={review.signed_date} onChange={setAdvisor('signed_date')} type="date" />
+        <AbfField label="Années remplacement revenu" value={review.replacement_years} onChange={setAdvisor('replacement_years')} inputMode="numeric" />
+        <AbfField label="Couverture finale recommandée" value={review.final_recommended_coverage} onChange={setAdvisor('final_recommended_coverage')} inputMode="decimal" placeholder={`${money(automaticCoverage)} $ automatique`} />
+        <AbfField label="Budget recommandation 1" value={review.recommendation_1_budget} onChange={setAdvisor('recommendation_1_budget')} inputMode="decimal" />
+        <AbfField label="Budget recommandation 2" value={review.recommendation_2_budget} onChange={setAdvisor('recommendation_2_budget')} inputMode="decimal" />
+        <AbfField label="Budget préféré client" value={review.client_preference_budget} onChange={setAdvisor('client_preference_budget')} inputMode="decimal" />
+      </div>
+      <AbfArea label="Notes recommandation 1" value={review.recommendation_1_notes} onChange={setAdvisor('recommendation_1_notes')} />
+      <AbfArea label="Notes recommandation 2" value={review.recommendation_2_notes} onChange={setAdvisor('recommendation_2_notes')} />
+      <AbfArea label="Préférence client / justification" value={review.preference_notes} onChange={setAdvisor('preference_notes')} />
+      <AbfArea label="Notes finales du conseiller" value={review.agent_notes} onChange={setAdvisor('agent_notes')} />
+    </div>
+  </section>;
+}
+
+function AbfField({ label, value, onChange, type = 'text', inputMode, placeholder }: { label: string; value: string; onChange: (event: React.ChangeEvent<HTMLInputElement>) => void; type?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']; placeholder?: string }) {
+  return <label className="abf-field"><span>{label}</span><input type={type} value={value} onChange={onChange} inputMode={inputMode} placeholder={placeholder} /></label>;
+}
+
+function AbfArea({ label, value, onChange }: { label: string; value: string; onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void }) {
+  return <label className="abf-field abf-area"><span>{label}</span><textarea value={value} onChange={onChange} /></label>;
+}
 
 function AdvisorReviewForm({ form, setForm, loading, onSave }: { form: ReviewState; setForm: (form: ReviewState) => void; loading: boolean; onSave: () => void }) {
   const set = (key: keyof ReviewState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value });
