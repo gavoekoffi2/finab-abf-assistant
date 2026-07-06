@@ -39,6 +39,7 @@ from .storage import (
     list_organizations,
     list_prospects,
     list_users,
+    prospect_review,
     prospect_submission,
     register_account,
     revoke_session,
@@ -46,6 +47,7 @@ from .storage import (
     set_stripe_customer,
     update_subscription_by_customer,
     update_prospect_payload,
+    update_prospect_review,
     update_subscription_by_user,
     update_user_by_owner,
 )
@@ -388,6 +390,13 @@ def prospect_detail(prospect_id: str, user: dict = Depends(current_paid_user)) -
     organization_id = None if user["role"] == "owner" else user["organization_id"]
     try:
         record = get_prospect(prospect_id, organization_id=organization_id)
+        target_organization_id = record.get("organization_id") or user["organization_id"]
+        if record.get("advisor_review") is None:
+            record["advisor_review"] = prospect_review(
+                prospect_id,
+                organization_id=organization_id,
+                organization=get_organization(target_organization_id),
+            ).model_dump(mode="json")
     except KeyError:
         raise HTTPException(status_code=404, detail="Prospect introuvable") from None
     record["documents"] = list_documents(prospect_id, organization_id=organization_id)
@@ -401,6 +410,19 @@ def update_prospect(prospect_id: str, payload: ProspectSubmission, user: dict = 
         record = update_prospect_payload(prospect_id, payload, organization_id=organization_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Prospect introuvable") from None
+    record["documents"] = list_documents(prospect_id, organization_id=organization_id)
+    return record
+
+
+@app.patch("/api/prospects/{prospect_id}/review")
+def update_prospect_advisor_review(prospect_id: str, review: AdvisorReview, user: dict = Depends(current_paid_user)) -> dict:
+    organization_id = None if user["role"] == "owner" else user["organization_id"]
+    try:
+        record = update_prospect_review(prospect_id, review, organization_id=organization_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prospect introuvable") from None
+    if record.get("advisor_review") is None:
+        record["advisor_review"] = review.model_dump(mode="json")
     record["documents"] = list_documents(prospect_id, organization_id=organization_id)
     return record
 
@@ -419,7 +441,8 @@ def generate_prospect_abf(
         raise HTTPException(status_code=404, detail="Prospect introuvable") from None
     target_organization_id = prospect_record.get("organization_id") or user["organization_id"]
     organization = get_organization(target_organization_id)
-    review = review or default_review(prospect, organization=organization)
+    if review is None or review == AdvisorReview():
+        review = prospect_review(prospect_id, organization_id=organization_id, organization=organization)
     result = _generate_abf(AbfGenerationRequest(prospect=prospect, review=review))
     save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
     return result

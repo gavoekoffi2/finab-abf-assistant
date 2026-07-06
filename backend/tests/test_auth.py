@@ -305,3 +305,69 @@ def test_owner_can_correct_prospect_before_pdf_generation() -> None:
     detail = client.get(f"/api/prospects/{prospect_id}", headers=headers)
     assert detail.status_code == 200
     assert detail.json()["payload"]["identity"]["legal_last_name"] == "Corrigé"
+
+
+def test_owner_can_save_advisor_review_used_for_pdf_generation(monkeypatch) -> None:
+    client = TestClient(app)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "KOFFI.AKPOBI@MYGREATWAY.CA", "password": "Finab-ABF-2026!"},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    payload = {
+        "identity": {
+            "legal_last_name": "Export",
+            "first_names": "Client",
+            "date_of_birth": "1990-01-01",
+            "marital_status": "célibataire",
+        },
+        "contact": {"phone": "5140000000", "email": "client-export@example.com", "address": "1 Rue A"},
+        "employment": {"occupation": "Employé", "annual_income": 40000},
+        "financial": {"total_assets": 10000, "total_debts": 2000},
+        "insurance": {"has_existing_life_insurance": False},
+        "goals": {"priority_projects": "Protection famille", "acceptable_monthly_budget": 150},
+        "meeting": {"availability": "Soir", "consent_acknowledged": True},
+    }
+    created = client.post("/api/prospects", json=payload)
+    prospect_id = created.json()["id"]
+
+    review = {
+        "reviewed_by_advisor": True,
+        "advisor_name": "Conseiller Correction",
+        "advisor_phone": "4382223333",
+        "advisor_email": "conseiller@example.com",
+        "signed_date": "2026-07-06",
+        "replacement_years": 12,
+        "final_recommended_coverage": 350000,
+        "recommendation_1_budget": 180,
+        "recommendation_2_budget": 250,
+        "client_preference_budget": 200,
+        "recommendation_1_notes": "Correction produit 1",
+        "recommendation_2_notes": "Correction produit 2",
+        "preference_notes": "Correction préférence",
+        "agent_notes": "Notes finales corrigées",
+    }
+    saved = client.patch(f"/api/prospects/{prospect_id}/review", headers=headers, json=review)
+    assert saved.status_code == 200
+    assert saved.json()["advisor_review"]["final_recommended_coverage"] == 350000
+
+    captured = {}
+
+    def fake_generate(request):
+        captured["review"] = request.review
+        return main.AbfGenerationResult(
+            output_path="/tmp/ABF_test.pdf",
+            pages_before=1,
+            pages_after=1,
+            is_form_pdf_before=True,
+            is_form_pdf_after=True,
+            filled_widget_updates=1,
+            missing_fields=[],
+            layout_preserved=True,
+        )
+
+    monkeypatch.setattr(main, "_generate_abf", fake_generate)
+    generated = client.post(f"/api/prospects/{prospect_id}/generate-abf", headers=headers, json={})
+    assert generated.status_code == 200
+    assert captured["review"].final_recommended_coverage == 350000
+    assert captured["review"].recommendation_1_notes == "Correction produit 1"

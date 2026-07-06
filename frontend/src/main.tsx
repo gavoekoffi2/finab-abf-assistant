@@ -37,7 +37,23 @@ type AuthSession = { token: string; expires_at: string; user: User };
 type BillingConfig = { plan_name: string; price_usd: number; trial_days: number; subscription: SubscriptionState } & Record<string, unknown>;
 type CheckoutStatus = { user: User; subscription: SubscriptionState; has_access: boolean };
 type ProspectSummary = { id: string; organization_id?: string; advisor_slug?: string; client_name: string; phone: string; email: string; status: string; created_at: string; updated_at?: string };
-type ProspectDetail = ProspectSummary & { payload: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
+type ReviewState = {
+  reviewed_by_advisor: boolean;
+  advisor_name: string;
+  advisor_phone: string;
+  advisor_email: string;
+  signed_date: string;
+  replacement_years: string;
+  final_recommended_coverage: string;
+  recommendation_1_budget: string;
+  recommendation_2_budget: string;
+  client_preference_budget: string;
+  recommendation_1_notes: string;
+  recommendation_2_notes: string;
+  preference_notes: string;
+  agent_notes: string;
+};
+type ProspectDetail = ProspectSummary & { payload: any; advisor_review?: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
 type AdminOverview = { organizations: number; users: number; active_users: number; admins?: number; unlimited_users?: number; prospects: number; documents: number; recent_prospects: ProspectSummary[]; plan_distribution?: Array<{ plan: string; subscription_status: string; c: number }> };
 type AdminUser = User & { organization: Organization };
 
@@ -45,6 +61,23 @@ const AUTH_KEY = 'finab_abf_session';
 
 const emptyForm: FormState = {
   legalLastName: '', firstNames: '', dateOfBirth: '', placeOfBirth: '', maritalStatus: '', dependents: '', arrivalInCanada: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerAddress: '', annualIncome: '', totalAssets: '', totalDebts: '', hasExistingInsurance: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', priorityProjects: '',
+};
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const emptyReview: ReviewState = {
+  reviewed_by_advisor: true,
+  advisor_name: '',
+  advisor_phone: '',
+  advisor_email: '',
+  signed_date: todayIso(),
+  replacement_years: '10',
+  final_recommended_coverage: '',
+  recommendation_1_budget: '',
+  recommendation_2_budget: '',
+  client_preference_budget: '',
+  recommendation_1_notes: '',
+  recommendation_2_notes: '',
+  preference_notes: '',
+  agent_notes: '',
 };
 
 const api = async <T,>(url: string, options?: RequestInit, token?: string): Promise<T> => {
@@ -113,6 +146,48 @@ function formFromPayload(payload: any): FormState {
     weight: payload?.health?.weight || '',
     availability: payload?.meeting?.availability || '',
     priorityProjects: payload?.goals?.priority_projects || '',
+  };
+}
+
+function reviewFromDetail(detail: ProspectDetail | null, session?: AuthSession | null): ReviewState {
+  const review = detail?.advisor_review || {};
+  const org = (session?.user.organization || {}) as Partial<Organization>;
+  const budget = detail?.payload?.goals?.acceptable_monthly_budget || '';
+  return {
+    ...emptyReview,
+    reviewed_by_advisor: review.reviewed_by_advisor ?? true,
+    advisor_name: review.advisor_name || org.advisor_name || session?.user.full_name || '',
+    advisor_phone: review.advisor_phone || org.advisor_phone || '',
+    advisor_email: review.advisor_email || org.advisor_email || session?.user.email || '',
+    signed_date: review.signed_date || todayIso(),
+    replacement_years: String(review.replacement_years ?? 10),
+    final_recommended_coverage: String(review.final_recommended_coverage || ''),
+    recommendation_1_budget: String(review.recommendation_1_budget || budget || ''),
+    recommendation_2_budget: String(review.recommendation_2_budget || (Number(budget) ? Number(budget) * 1.5 : '') || ''),
+    client_preference_budget: String(review.client_preference_budget || budget || ''),
+    recommendation_1_notes: review.recommendation_1_notes || '',
+    recommendation_2_notes: review.recommendation_2_notes || '',
+    preference_notes: review.preference_notes || '',
+    agent_notes: review.agent_notes || '',
+  };
+}
+
+function reviewPayload(form: ReviewState) {
+  return {
+    reviewed_by_advisor: true,
+    advisor_name: form.advisor_name,
+    advisor_phone: form.advisor_phone,
+    advisor_email: form.advisor_email,
+    signed_date: form.signed_date || todayIso(),
+    replacement_years: numberValue(form.replacement_years),
+    final_recommended_coverage: numberValue(form.final_recommended_coverage),
+    recommendation_1_budget: numberValue(form.recommendation_1_budget),
+    recommendation_2_budget: numberValue(form.recommendation_2_budget),
+    client_preference_budget: numberValue(form.client_preference_budget),
+    recommendation_1_notes: form.recommendation_1_notes,
+    recommendation_2_notes: form.recommendation_2_notes,
+    preference_notes: form.preference_notes,
+    agent_notes: form.agent_notes,
   };
 }
 
@@ -323,6 +398,7 @@ function AdvisorDashboard() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<FormState>(emptyForm);
+  const [reviewForm, setReviewForm] = useState<ReviewState>(emptyReview);
   const token = session?.token;
 
   async function refresh(selectId?: string) {
@@ -340,6 +416,7 @@ function AdvisorDashboard() {
       const detail = await api<ProspectDetail>(`/api/prospects/${id}`, undefined, token);
       setSelected(detail);
       setEditForm(formFromPayload(detail.payload));
+      setReviewForm(reviewFromDetail(detail, session));
       setEditing(false);
     }
     catch { setMessage('Impossible de charger ce prospect.'); }
@@ -349,11 +426,25 @@ function AdvisorDashboard() {
     if (!selected || !token) return;
     setLoading(true); setMessage(''); setPdfPath('');
     try {
-      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: '{}' }, token);
+      await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
+      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       setPdfPath(result.output_path);
-      setMessage('Document ABF généré avec succès.');
+      setMessage('Corrections conseiller enregistrées et document ABF généré avec succès.');
       await refresh(selected.id);
-    } catch { setMessage("Impossible de générer l'ABF pour ce prospect."); }
+    } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les corrections conseiller."); }
+    finally { setLoading(false); }
+  }
+
+  async function saveAdvisorReview() {
+    if (!selected || !token) return;
+    setLoading(true); setMessage(''); setPdfPath('');
+    try {
+      const updated = await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
+      setSelected(updated);
+      setReviewForm(reviewFromDetail(updated, session));
+      setMessage('Préparation ABF enregistrée. Le prochain export utilisera ces corrections.');
+      await refresh(updated.id);
+    } catch { setMessage('Enregistrement de la préparation ABF impossible.'); }
     finally { setLoading(false); }
   }
 
@@ -448,6 +539,7 @@ function AdvisorDashboard() {
             <InfoCard title="Assurance / budget" rows={[[ 'Assurance existante', p.insurance?.has_existing_life_insurance ? 'Oui' : 'Non' ], [ 'Détails assurance / placements', p.insurance?.existing_retirement_savings_note ], [ 'Si non : raison', p.insurance?.no_insurance_reason ], [ 'Budget possible', `$${money(p.goals?.acceptable_monthly_budget)}` ]]}/>
             <InfoCard title="Santé / disponibilité / projets" rows={[[ 'Taille', p.health?.height ], [ 'Poids', p.health?.weight ], [ 'Disponibilité', p.meeting?.availability ], [ 'Projets prioritaires', p.goals?.priority_projects ]]}/>
           </div>}
+          <AdvisorReviewForm form={reviewForm} setForm={setReviewForm} loading={loading} onSave={saveAdvisorReview} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
@@ -548,6 +640,29 @@ function AdminPanel({ session }: { session: AuthSession }) {
       </div>
     </section>
   );
+}
+
+
+function AdvisorReviewForm({ form, setForm, loading, onSave }: { form: ReviewState; setForm: (form: ReviewState) => void; loading: boolean; onSave: () => void }) {
+  const set = (key: keyof ReviewState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value });
+  return <section className="advisor-card edit-prospect-card advisor-review-card">
+    <div className="edit-prospect-head"><div><h2>Préparation ABF modifiable avant export</h2><p className="muted">Le conseiller peut corriger ici les calculs, budgets, recommandations et notes qui seront injectés dans le PDF exporté.</p></div><div className="edit-actions"><button className="submit-button compact" type="button" onClick={onSave} disabled={loading}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer la préparation</button></div></div>
+    <div className="form-grid edit-form-grid">
+      <label>Nom du conseiller<input value={form.advisor_name} onChange={set('advisor_name')} /></label>
+      <label>Téléphone conseiller<input value={form.advisor_phone} onChange={set('advisor_phone')} /></label>
+      <label>Courriel conseiller<input value={form.advisor_email} onChange={set('advisor_email')} /></label>
+      <label>Date de signature / validation<input type="date" value={form.signed_date} onChange={set('signed_date')} /></label>
+      <label>Années de remplacement de revenu<input value={form.replacement_years} onChange={set('replacement_years')} inputMode="numeric" /></label>
+      <label>Couverture finale recommandée<input value={form.final_recommended_coverage} onChange={set('final_recommended_coverage')} inputMode="decimal" placeholder="Laisser vide pour utiliser le calcul automatique" /></label>
+      <label>Budget recommandation 1<input value={form.recommendation_1_budget} onChange={set('recommendation_1_budget')} inputMode="decimal" /></label>
+      <label>Budget recommandation 2<input value={form.recommendation_2_budget} onChange={set('recommendation_2_budget')} inputMode="decimal" /></label>
+      <label>Budget préféré du client<input value={form.client_preference_budget} onChange={set('client_preference_budget')} inputMode="decimal" /></label>
+      <label className="span-2">Notes recommandation 1<textarea value={form.recommendation_1_notes} onChange={set('recommendation_1_notes')} placeholder="Texte qui remplace la recommandation automatique dans le PDF" /></label>
+      <label className="span-2">Notes recommandation 2<textarea value={form.recommendation_2_notes} onChange={set('recommendation_2_notes')} /></label>
+      <label className="span-2">Préférence client / justification<textarea value={form.preference_notes} onChange={set('preference_notes')} /></label>
+      <label className="span-2">Notes agent à exporter<textarea value={form.agent_notes} onChange={set('agent_notes')} placeholder="Notes finales du conseiller dans le document ABF" /></label>
+    </div>
+  </section>;
 }
 
 

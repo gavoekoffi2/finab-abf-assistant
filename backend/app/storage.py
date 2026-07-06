@@ -108,6 +108,7 @@ def connect() -> sqlite3.Connection:
             email TEXT,
             status TEXT NOT NULL DEFAULT 'new',
             payload_json TEXT NOT NULL,
+            advisor_review_json TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY(organization_id) REFERENCES organizations(id)
@@ -129,6 +130,7 @@ def connect() -> sqlite3.Connection:
         """
     )
     _ensure_column(conn, "prospects", "organization_id", "TEXT")
+    _ensure_column(conn, "prospects", "advisor_review_json", "TEXT")
     _ensure_column(conn, "abf_documents", "organization_id", "TEXT")
     _ensure_column(conn, "users", "is_active", "INTEGER NOT NULL DEFAULT 1")
     _ensure_column(conn, "users", "plan", "TEXT NOT NULL DEFAULT 'finab_pro'")
@@ -721,6 +723,18 @@ def prospect_submission(prospect_id: str, organization_id: str | None = None) ->
     return ProspectSubmission.model_validate(record["payload"])
 
 
+def prospect_review(
+    prospect_id: str,
+    organization_id: str | None = None,
+    organization: dict | None = None,
+) -> AdvisorReview:
+    record = get_prospect(prospect_id, organization_id=organization_id)
+    review = record.get("advisor_review")
+    if review:
+        return AdvisorReview.model_validate(review)
+    return default_review(ProspectSubmission.model_validate(record["payload"]), organization=organization)
+
+
 def update_prospect_payload(
     prospect_id: str,
     prospect: ProspectSubmission,
@@ -750,6 +764,32 @@ def update_prospect_payload(
             now_iso(),
             prospect_id,
         ),
+    )
+    conn.commit()
+    return get_prospect(prospect_id, organization_id=organization_id)
+
+
+def update_prospect_review(
+    prospect_id: str,
+    review: AdvisorReview,
+    organization_id: str | None = None,
+) -> dict:
+    conn = connect()
+    if organization_id:
+        row = conn.execute(
+            "SELECT id FROM prospects WHERE id=? AND organization_id=?", (prospect_id, organization_id)
+        ).fetchone()
+    else:
+        row = conn.execute("SELECT id FROM prospects WHERE id=?", (prospect_id,)).fetchone()
+    if not row:
+        raise KeyError(prospect_id)
+    conn.execute(
+        """
+        UPDATE prospects
+        SET advisor_review_json=?, updated_at=?
+        WHERE id=?
+        """,
+        (json.dumps(review.model_dump(mode="json"), ensure_ascii=False), now_iso(), prospect_id),
     )
     conn.commit()
     return get_prospect(prospect_id, organization_id=organization_id)
@@ -878,6 +918,7 @@ def _row_to_prospect(row: sqlite3.Row, include_payload: bool) -> dict:
     }
     if include_payload:
         data["payload"] = json.loads(row["payload_json"])
+        data["advisor_review"] = json.loads(row["advisor_review_json"]) if row["advisor_review_json"] else None
     return data
 
 
