@@ -429,9 +429,9 @@ function AdvisorDashboard() {
       await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
       await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
-      setPdfPath(result.output_path);
-      setMessage('ABF enregistré, généré et prêt à télécharger avec les corrections visibles sur la page.');
       await refresh(selected.id);
+      setPdfPath(result.output_path);
+      setMessage('ABF enregistré et généré. Le PDF modifiable s’affiche maintenant directement dans votre espace.');
     } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs ABF modifiables."); }
     finally { setLoading(false); }
   }
@@ -514,6 +514,8 @@ function AdvisorDashboard() {
   const pendingCount = Math.max(prospects.length - generatedCount, 0);
   const selectedStatus = selected ? statusLabel(selected.status) : 'Aucun dossier';
   const selectedInitials = (selected?.client_name || 'ABF').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'ABF';
+  const latestPdfPath = pdfPath || selected?.documents?.[0]?.output_path || '';
+  const pdfPreviewUrl = latestPdfPath && token ? `/abf/view?path=${encodeURIComponent(latestPdfPath)}&token=${encodeURIComponent(token)}#zoom=page-width` : '';
   return (
     <main className="advisor-page">
       <aside className="advisor-sidebar">
@@ -545,10 +547,11 @@ function AdvisorDashboard() {
           <div><Download size={18}/><span>3. Enregistrer, exporter et télécharger</span></div>
         </section>
         {canAdminister && <AdminPanel session={session} />}
-        {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{pdfPath && <button className="inline-link" onClick={() => downloadPdf(pdfPath)}>Télécharger le PDF ABF</button>}</div>}
+        {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{latestPdfPath && <button className="inline-link" onClick={() => downloadPdf(latestPdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
           <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer l’ABF</button><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Exporter PDF ABF</button></div></section>
+          <PdfInlineEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} loading={loading} onExport={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
           <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
@@ -650,6 +653,19 @@ function AdminPanel({ session }: { session: AuthSession }) {
       </div>
     </section>
   );
+}
+
+
+function PdfInlineEditor({ previewUrl, pdfPath, loading, onExport, onDownload }: { previewUrl: string; pdfPath: string; loading: boolean; onExport: () => void; onDownload: () => void }) {
+  return <section className="advisor-card pdf-editor-card">
+    <div className="pdf-editor-head">
+      <div><p className="eyebrow">PDF ABF modifiable</p><h2>Modifier directement sur le PDF généré</h2><p>Après génération, le vrai formulaire PDF FINAB s’affiche ici dans l’espace conseiller. Les champs du PDF restent remplissables directement dans le lecteur PDF du navigateur.</p></div>
+      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Régénérer le PDF</button>{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
+    </div>
+    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF affiché pour ce dossier.</strong><span>Cliquez sur “Exporter PDF ABF” pour générer le formulaire, puis il apparaîtra directement ici pour correction.</span></div>}
+    {previewUrl && <div className="pdf-frame-shell"><iframe title="PDF ABF modifiable" className="pdf-frame" src={previewUrl} /></div>}
+    {previewUrl && <p className="pdf-helper">Astuce : cliquez dans les champs du PDF affiché pour corriger le document. Si votre téléphone n’autorise pas l’édition intégrée, utilisez “Télécharger” ou ouvrez le PDF dans le lecteur PDF du navigateur.</p>}
+  </section>;
 }
 
 

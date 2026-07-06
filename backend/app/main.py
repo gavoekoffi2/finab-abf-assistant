@@ -123,14 +123,20 @@ def require_stripe():
     return stripe, price_id
 
 
-def current_user(authorization: str | None = Header(default=None)) -> dict:
-    scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not token:
+def _user_from_token(token: str | None) -> dict:
+    if not token:
         raise HTTPException(status_code=401, detail="Connexion conseiller requise")
     user = get_session_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="Session expirée ou invalide")
     return user
+
+
+def current_user(authorization: str | None = Header(default=None)) -> dict:
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Connexion conseiller requise")
+    return _user_from_token(token)
 
 
 def current_paid_user(user: dict = Depends(current_user)) -> dict:
@@ -473,6 +479,20 @@ def download(path: str, user: dict = Depends(current_paid_user)) -> FileResponse
         raise HTTPException(status_code=404, detail="PDF introuvable")
     # The path itself is only revealed by protected prospect/document endpoints.
     return FileResponse(p, media_type="application/pdf", filename=p.name)
+
+
+@app.get("/abf/view")
+def view_pdf(path: str, token: str | None = None) -> FileResponse:
+    user = _user_from_token(token)
+    if not (user.get("role") == "owner" or user.get("subscription", {}).get("has_access")):
+        raise HTTPException(status_code=402, detail="Abonnement requis pour accéder à FINAB ABF Flow")
+    p = Path(path).resolve()
+    if OUTPUT_DIR.resolve() not in p.parents or not p.exists():
+        raise HTTPException(status_code=404, detail="PDF introuvable")
+    # Native browser PDF viewers cannot send Authorization headers from an iframe.
+    # This protected query-token endpoint lets the advisor see and fill the actual
+    # generated AcroForm PDF directly in the workspace instead of only downloading it.
+    return FileResponse(p, media_type="application/pdf", filename=p.name, content_disposition_type="inline")
 
 
 if FRONTEND_DIST.exists():
