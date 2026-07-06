@@ -428,10 +428,13 @@ function AdvisorDashboard() {
     try {
       await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
       await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
+      const pendingPdfTab = window.open('', '_blank');
       const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
+      const nextPreviewUrl = pdfViewerUrl(result.output_path, token);
+      if (pendingPdfTab && nextPreviewUrl) pendingPdfTab.location.href = nextPreviewUrl;
       await refresh(selected.id);
       setPdfPath(result.output_path);
-      setMessage('ABF enregistré et généré. Le PDF modifiable s’affiche maintenant directement dans votre espace.');
+      setMessage('ABF enregistré et généré. Le vrai PDF vient de s’ouvrir dans un nouvel onglet et reste aussi disponible en haut de ce dossier.');
     } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs ABF modifiables."); }
     finally { setLoading(false); }
   }
@@ -515,7 +518,7 @@ function AdvisorDashboard() {
   const selectedStatus = selected ? statusLabel(selected.status) : 'Aucun dossier';
   const selectedInitials = (selected?.client_name || 'ABF').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'ABF';
   const latestPdfPath = pdfPath || selected?.documents?.[0]?.output_path || '';
-  const pdfPreviewUrl = latestPdfPath && token ? `/abf/view?path=${encodeURIComponent(latestPdfPath)}&token=${encodeURIComponent(token)}#zoom=page-width` : '';
+  const pdfPreviewUrl = pdfViewerUrl(latestPdfPath, token);
   return (
     <main className="advisor-page">
       <aside className="advisor-sidebar">
@@ -550,9 +553,9 @@ function AdvisorDashboard() {
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{latestPdfPath && <button className="inline-link" onClick={() => downloadPdf(latestPdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
-          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer l’ABF</button><button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Exporter PDF ABF</button></div></section>
-          <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
+          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer l’ABF</button>{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Ouvrir le vrai PDF</a>}<button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Exporter / ouvrir PDF ABF</button></div></section>
           <PdfInlineEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} loading={loading} onExport={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
+          <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
@@ -656,14 +659,18 @@ function AdminPanel({ session }: { session: AuthSession }) {
 }
 
 
+function pdfViewerUrl(path: string, token?: string) {
+  return path && token ? `/abf/view?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}#zoom=page-width` : '';
+}
+
 function PdfInlineEditor({ previewUrl, pdfPath, loading, onExport, onDownload }: { previewUrl: string; pdfPath: string; loading: boolean; onExport: () => void; onDownload: () => void }) {
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
-      <div><p className="eyebrow">PDF modifiable dans l’espace conseiller</p><h2>Modifier directement le PDF</h2><p>Après l’export, le vrai PDF ABF s’affiche ici. Cliquez directement dans les champs du PDF pour corriger, puis utilisez le bouton de téléchargement du lecteur PDF ou le bouton ci-dessous pour récupérer le document.</p></div>
+      <div><p className="eyebrow">Vrai PDF ABF</p><h2>Ouvrir et modifier le PDF</h2><p>Cliquez sur “Exporter / ouvrir PDF” : le système génère le document et ouvre immédiatement le vrai PDF dans un nouvel onglet. Quand un PDF existe déjà, il est aussi affiché ici en haut du dossier.</p></div>
       <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Exporter / régénérer PDF</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Ouvrir le PDF</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger le PDF</button>}</div>
     </div>
-    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF généré pour ce dossier.</strong><span>Cliquez sur “Exporter PDF ABF” : le système remplira le document, puis le PDF modifiable apparaîtra ici dans l’espace conseiller.</span></div>}
-    {previewUrl && <><div className="pdf-frame-shell"><iframe className="pdf-frame" src={previewUrl} title="PDF ABF modifiable" /></div><p className="pdf-helper">Important : si votre téléphone ouvre le PDF dans une application externe, utilisez “Ouvrir le PDF”. Sur ordinateur, les champs du PDF se modifient directement dans cette zone.</p></>}
+    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF généré pour ce dossier.</strong><span>Cliquez sur “Exporter / ouvrir PDF ABF” : le PDF sera créé et ouvert automatiquement. Les corrections métier peuvent aussi être faites juste en dessous avant l’export.</span></div>}
+    {previewUrl && <><div className="pdf-frame-shell"><object className="pdf-frame" data={previewUrl} type="application/pdf"><iframe className="pdf-frame" src={previewUrl} title="PDF ABF modifiable" /></object></div><p className="pdf-helper">Si le PDF ne s’affiche pas dans cette zone, cliquez sur “Ouvrir le PDF” en haut : certains téléphones bloquent l’affichage intégré, mais le PDF s’ouvre dans un nouvel onglet.</p></>}
   </section>;
 }
 
