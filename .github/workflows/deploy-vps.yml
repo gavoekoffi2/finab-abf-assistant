@@ -1,0 +1,94 @@
+name: Deploy FINAB ABF to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: finab-abf-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build, test and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install '.[dev]'
+
+      - name: Run backend tests
+        run: python -m pytest backend/tests -q
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          test -n "$VPS_HOST"
+          test -n "$VPS_SSH_KEY"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/finab_abf_deploy_key
+          chmod 600 ~/.ssh/finab_abf_deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync source to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+        run: |
+          test -n "$VPS_USER"
+          test -n "$VPS_APP_DIR"
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/finab_abf_deploy_key -o StrictHostKeyChecking=yes" \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.env' \
+            --exclude 'data/' \
+            --exclude 'output/' \
+            --exclude 'frontend/node_modules/' \
+            --exclude 'backend/**/__pycache__/' \
+            --exclude '.pytest_cache/' \
+            ./ "$VPS_USER@$VPS_HOST:$VPS_APP_DIR/"
+
+      - name: Rebuild and restart production container
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+        run: |
+          ssh -i ~/.ssh/finab_abf_deploy_key -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
+            "cd '$VPS_APP_DIR' && docker compose -f docker-compose.prod.yml up -d --build && docker ps --filter name=finab-abf-assistant --format '{{.Names}} {{.Status}}'"
+
+      - name: Smoke-test live conseiller page
+        run: |
+          curl -fsS --retry 6 --retry-delay 5 https://abf.finablasolution.cloud/conseiller -o /tmp/finab-conseiller.html
+          grep -q '/assets/index-' /tmp/finab-conseiller.html
+          curl -fsS https://abf.finablasolution.cloud/assets/$(grep -o 'index-[^" ]*\.js' /tmp/finab-conseiller.html | head -1) | grep -q 'api/pdf/fields'
