@@ -54,7 +54,7 @@ type ReviewState = {
   agent_notes: string;
 };
 type ProspectDetail = ProspectSummary & { payload: any; advisor_review?: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
-type PdfTextEdit = { page: number; x: number; y: number; text: string; size: number; cover: boolean };
+type PdfField = { name: string; value: string; type: string; page: number; rect: [number, number, number, number]; multiline: boolean; max_length: number; options: string[] };
 type AdminOverview = { organizations: number; users: number; active_users: number; admins?: number; unlimited_users?: number; prospects: number; documents: number; recent_prospects: ProspectSummary[]; plan_distribution?: Array<{ plan: string; subscription_status: string; c: number }> };
 type AdminUser = User & { organization: Organization };
 
@@ -437,15 +437,15 @@ function AdvisorDashboard() {
     finally { setLoading(false); }
   }
 
-  async function exportPdfEdits(path: string, edits: PdfTextEdit[]) {
-    if (!selected || !token || !path || edits.length === 0) return;
+  async function updatePdfFields(path: string, fields: Record<string, string>) {
+    if (!selected || !token || !path || Object.keys(fields).length === 0) return;
     setLoading(true); setMessage('');
     try {
-      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/pdf-edits`, { method: 'POST', body: JSON.stringify({ path, edits }) }, token);
+      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/pdf-fields`, { method: 'PATCH', body: JSON.stringify({ path, fields }) }, token);
       await refresh(selected.id);
       setPdfPath(result.output_path);
-      setMessage('PDF modifié enregistré. Le nouveau PDF est prêt à être vérifié ou téléchargé.');
-    } catch { setMessage('Impossible d’appliquer les modifications sur le PDF. Vérifiez le texte ajouté puis réessayez.'); }
+      setMessage('Champs du PDF mis à jour. Les modifications sont enregistrées et rechargées ci-dessous.');
+    } catch { setMessage('Impossible d’enregistrer les modifications du PDF. Vérifiez les champs puis réessayez.'); }
     finally { setLoading(false); }
   }
 
@@ -564,7 +564,7 @@ function AdvisorDashboard() {
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
           <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer les corrections</button>{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}<button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF final</button></div></section>
-          <PdfInlineEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} onGenerate={generateAbf} onExportEdits={exportPdfEdits} onDownload={() => downloadPdf(latestPdfPath)} />
+          <PdfFormEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} onGenerate={generateAbf} onUpdateFields={updatePdfFields} onDownload={() => downloadPdf(latestPdfPath)} />
           <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
@@ -673,83 +673,83 @@ function pdfViewerUrl(path: string, token?: string) {
   return path && token ? `/abf/view?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}#zoom=page-width` : '';
 }
 
-function PdfInlineEditor({ previewUrl, pdfPath, token, loading, onGenerate, onExportEdits, onDownload }: { previewUrl: string; pdfPath: string; token: string; loading: boolean; onGenerate: () => void; onExportEdits: (path: string, edits: PdfTextEdit[]) => void; onDownload: () => void }) {
+function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpdateFields, onDownload }: { previewUrl: string; pdfPath: string; token: string; loading: boolean; onGenerate: () => void; onUpdateFields: (path: string, fields: Record<string, string>) => void; onDownload: () => void }) {
   const [pageCount, setPageCount] = useState(1);
   const [page, setPage] = useState(0);
-  const [edits, setEdits] = useState<PdfTextEdit[]>([]);
-  const [cover, setCover] = useState(true);
-  const [size, setSize] = useState(11);
-  const [selectedEdit, setSelectedEdit] = useState<number | null>(null);
-  const [hint, setHint] = useState('Cliquez sur le PDF pour ajouter une correction.');
+  const [fields, setFields] = useState<PdfField[]>([]);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
-    setEdits([]); setPage(0); setSelectedEdit(null); setHint('Cliquez sur le PDF pour ajouter une correction.');
+    setPage(0); setFields([]); setValues({}); setLoadError('');
     if (!pdfPath || !token) return;
-    api<{ page_count: number }>(`/api/pdf/info?path=${encodeURIComponent(pdfPath)}`, undefined, token)
-      .then((info) => setPageCount(Math.max(info.page_count || 1, 1)))
-      .catch(() => setPageCount(1));
+    setFieldsLoading(true);
+    Promise.all([
+      api<{ page_count: number }>(`/api/pdf/info?path=${encodeURIComponent(pdfPath)}`, undefined, token),
+      api<{ fields: PdfField[] }>(`/api/pdf/fields?path=${encodeURIComponent(pdfPath)}`, undefined, token),
+    ])
+      .then(([info, data]) => {
+        setPageCount(Math.max(info.page_count || 1, 1));
+        setFields(data.fields || []);
+        setValues(Object.fromEntries((data.fields || []).map((field) => [field.name, field.value || ''])));
+      })
+      .catch(() => setLoadError('Impossible de charger les champs du PDF pour ce dossier.'))
+      .finally(() => setFieldsLoading(false));
   }, [pdfPath, token]);
 
   const pageIndexes = Array.from({ length: pageCount }, (_, index) => index);
   const imageUrlForPage = (pageIndex: number) => pdfPath && token ? `/api/pdf/page-image?path=${encodeURIComponent(pdfPath)}&page=${pageIndex}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(pdfPath)}` : '';
-  function addEdit(pageIndex: number, event: React.MouseEvent<HTMLDivElement>) {
-    if (!pdfPath) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = (event.clientY - rect.top) / rect.height;
-    setPage(pageIndex);
-    const nextEdit = { page: pageIndex, x: Math.max(0, Math.min(0.95, x)), y: Math.max(0, Math.min(0.95, y)), text: '', size, cover };
-    setEdits((current) => {
-      setSelectedEdit(current.length);
-      return [...current, nextEdit];
-    });
-    setHint(`Correction ajoutée sur la page ${pageIndex + 1}. Écrivez le texte dans le panneau “Corrections à saisir” ou dans la grande zone bleue sur le PDF.`);
-  }
-  function updateEdit(index: number, next: Partial<PdfTextEdit>) {
-    setEdits(edits.map((edit, idx) => idx === index ? { ...edit, ...next } : edit));
-  }
-  function removeEdit(index: number) {
-    setEdits(edits.filter((_, idx) => idx !== index));
-    setSelectedEdit((current) => current === index ? null : current !== null && current > index ? current - 1 : current);
-  }
-  const exportableEdits = edits.filter((edit) => edit.text.trim());
+  const originalByName = useMemo(() => Object.fromEntries(fields.map((field) => [field.name, field.value || ''])), [fields]);
+  const changedFields = useMemo(() => {
+    const diff: Record<string, string> = {};
+    for (const field of fields) {
+      if ((values[field.name] ?? '') !== (originalByName[field.name] ?? '')) diff[field.name] = values[field.name] ?? '';
+    }
+    return diff;
+  }, [fields, values, originalByName]);
+  const changedCount = Object.keys(changedFields).length;
+  function setFieldValue(name: string, value: string) { setValues((current) => ({ ...current, [name]: value })); }
+  function resetChanges() { setValues(Object.fromEntries(fields.map((field) => [field.name, field.value || '']))); }
 
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
-      <div><p className="eyebrow">Éditeur PDF intégré</p><h2>Modifier directement le PDF dans l’espace conseiller</h2><p>Le PDF est transformé en page éditable ici. Cliquez sur l’endroit à corriger, tapez le nouveau texte, puis exportez la version modifiée sans ouvrir un autre logiciel.</p></div>
-      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer / mettre à jour PDF</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir original</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
+      <div><p className="eyebrow">Éditeur PDF intégré</p><h2>Modifier directement les champs du PDF</h2><p>Cliquez dans n’importe quel champ affiché sur le PDF, corrigez la valeur, puis enregistrez. Les modifications sont écrites dans les vrais champs du formulaire ABF, sans repasser par le formulaire client.</p></div>
+      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Régénérer depuis le formulaire</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
     </div>
     {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF final généré pour ce dossier.</strong><span>Remplissez ou corrigez les champs ABF ci-dessous, puis cliquez sur “Générer le PDF final”.</span></div>}
     {previewUrl && <>
       <div className="pdf-editor-toolbar">
         <button type="button" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Page précédente</button>
-        <strong>Page sélectionnée {page + 1} / {pageCount}</strong>
+        <strong>Page {page + 1} / {pageCount}</strong>
         <button type="button" onClick={() => setPage(Math.min(pageCount - 1, page + 1))} disabled={page + 1 >= pageCount}>Page suivante</button>
         <div className="pdf-page-jump" aria-label="Accès rapide aux pages PDF">{pageIndexes.map((pageIndex) => <button key={pageIndex} type="button" className={pageIndex === page ? 'active' : ''} onClick={() => setPage(pageIndex)}>P{pageIndex + 1}</button>)}</div>
-        <label>Texte <select value={size} onChange={(event) => setSize(Number(event.target.value))}><option value="9">Petit</option><option value="11">Normal</option><option value="14">Grand</option><option value="18">Très grand</option></select></label>
-        <label className="pdf-cover-toggle"><input type="checkbox" checked={cover} onChange={(event) => setCover(event.target.checked)} /> Masquer l’ancien texte</label>
-        <button className="submit-button compact" type="button" disabled={loading || exportableEdits.length === 0} onClick={() => onExportEdits(pdfPath, exportableEdits)}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Exporter PDF modifié</button>
+        <button type="button" onClick={resetChanges} disabled={changedCount === 0}>Annuler les modifications</button>
+        <button className="submit-button compact" type="button" disabled={loading || changedCount === 0} onClick={() => onUpdateFields(pdfPath, changedFields)}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
       </div>
-      <p className="pdf-helper">{hint} Les {pageCount} pages du PDF sont affichées ci-dessous : faites défiler, choisissez une page, cliquez exactement à l’endroit à corriger, puis exportez. Corrections ajoutées : {exportableEdits.length}.</p>
-      {edits.length > 0 && <div className="pdf-edit-list">
-        <div className="pdf-edit-list-head"><strong>Corrections à saisir</strong><span>Écrivez ici si la zone sur le PDF est difficile à modifier sur téléphone.</span></div>
-        {edits.map((edit, index) => <div className={selectedEdit === index ? 'pdf-edit-item active' : 'pdf-edit-item'} key={index} onClick={() => { setSelectedEdit(index); setPage(edit.page); }}>
-          <div className="pdf-edit-item-meta"><strong>Correction {index + 1}</strong><span>Page {edit.page + 1}</span></div>
-          <textarea value={edit.text} onChange={(event) => updateEdit(index, { text: event.target.value })} placeholder="Tapez le texte exact à mettre sur le PDF" />
-          <div className="pdf-edit-item-actions">
-            <label><input type="checkbox" checked={edit.cover} onChange={(event) => updateEdit(index, { cover: event.target.checked })} /> Masquer l’ancien texte</label>
-            <label>Taille <select value={edit.size} onChange={(event) => updateEdit(index, { size: Number(event.target.value) })}><option value="9">Petit</option><option value="11">Normal</option><option value="14">Grand</option><option value="18">Très grand</option></select></label>
-            <button type="button" onClick={(event) => { event.stopPropagation(); removeEdit(index); }}>Retirer</button>
-          </div>
-        </div>)}
-      </div>}
+      <p className="pdf-helper">{fieldsLoading ? 'Chargement des champs du PDF…' : loadError || `Les ${fields.length} champs éditables du PDF sont superposés à l’aperçu ci-dessous. Modifiez-les directement, même sur téléphone, puis enregistrez. Champs modifiés : ${changedCount}.`}</p>
       <div className="pdf-canvas-shell all-pages">
         {pageIndexes.map((pageIndex) => {
-          const pageEdits = edits.map((edit, index) => ({ edit, index })).filter(({ edit }) => edit.page === pageIndex);
+          const pageFields = fields.filter((field) => field.page === pageIndex);
           const pageImageUrl = imageUrlForPage(pageIndex);
           return <div className={pageIndex === page ? 'pdf-page-block selected' : 'pdf-page-block'} key={pageIndex}>
-            <div className="pdf-page-label"><strong>Page {pageIndex + 1}</strong><span>{pageEdits.length} correction(s)</span><button type="button" onClick={() => setPage(pageIndex)}>Sélectionner cette page</button></div>
-            <div className="pdf-page-canvas" onClick={(event) => addEdit(pageIndex, event)}>{pageImageUrl && <img src={pageImageUrl} alt={`Page ${pageIndex + 1} du PDF ABF`} loading="lazy" />}{pageEdits.map(({ edit, index }) => <div className={selectedEdit === index ? 'pdf-edit-box active' : 'pdf-edit-box'} key={index} style={{ left: `${edit.x * 100}%`, top: `${edit.y * 100}%` }} onClick={(event) => { event.stopPropagation(); setSelectedEdit(index); }}><textarea value={edit.text} onChange={(event) => updateEdit(index, { text: event.target.value })} placeholder="Écrire ici" style={{ fontSize: edit.size }} autoFocus={selectedEdit === index} /><div><label><input type="checkbox" checked={edit.cover} onChange={(event) => updateEdit(index, { cover: event.target.checked })} /> Masquer</label><button type="button" onClick={() => removeEdit(index)}>Retirer</button></div></div>)}</div>
+            <div className="pdf-page-label"><strong>Page {pageIndex + 1}</strong><span>{pageFields.length} champ(s)</span><button type="button" onClick={() => setPage(pageIndex)}>Sélectionner cette page</button></div>
+            <div className="pdf-page-canvas pdf-form-canvas">
+              {pageImageUrl && <img src={pageImageUrl} alt={`Page ${pageIndex + 1} du PDF ABF`} loading="lazy" />}
+              {pageFields.map((field) => {
+                const [x0, y0, x1, y1] = field.rect;
+                const style: React.CSSProperties = { left: `${x0 * 100}%`, top: `${y0 * 100}%`, width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%` };
+                const changed = (values[field.name] ?? '') !== (originalByName[field.name] ?? '');
+                const common = { value: values[field.name] ?? '', title: field.name, onFocus: () => setPage(pageIndex), 'aria-label': field.name };
+                return <div className={changed ? 'pdf-field-overlay changed' : 'pdf-field-overlay'} key={`${field.name}-${x0}-${y0}`} style={style}>
+                  {field.multiline
+                    ? <textarea {...common} onChange={(event) => setFieldValue(field.name, event.target.value)} />
+                    : field.options && field.options.length > 0
+                      ? <select {...common} onChange={(event) => setFieldValue(field.name, event.target.value)}><option value="">—</option>{field.options.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+                      : <input {...common} maxLength={field.max_length || undefined} onChange={(event) => setFieldValue(field.name, event.target.value)} />}
+                </div>;
+              })}
+            </div>
           </div>;
         })}
       </div>
