@@ -61,9 +61,16 @@ def test_update_acroform_fields_persists_and_stays_editable(tmp_path: Path) -> N
 
     doc = fitz.open(output)
     try:
+        text = doc[0].get_text()
+        # The edited field shows a single clean value: the previous text must not
+        # remain underneath, and the new value must appear exactly once.
+        assert "Alice EDITED" in text
+        assert text.count("Alice EDITED") == 1
+        assert "Alice" not in text.replace("Alice EDITED", "")  # no leftover old value
+        # NeedAppearances is intentionally NOT set so readers keep the baked,
+        # single-value appearance instead of re-rendering over it.
         catalog = doc.pdf_catalog()
-        acroform = doc.xref_get_key(catalog, "AcroForm/NeedAppearances")
-        assert acroform[1] == "true"
+        assert doc.xref_get_key(catalog, "AcroForm/NeedAppearances")[0] == "null"
         for widget in doc[0].widgets() or []:
             assert not (int(widget.field_flags or 0) & 1)  # read-only bit cleared
     finally:
