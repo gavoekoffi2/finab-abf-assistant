@@ -100,6 +100,7 @@ jobs:
 
       - name: Smoke-test live conseiller page
         run: |
-          curl -fsS --retry 6 --retry-delay 5 https://abf.finablasolution.cloud/conseiller -o /tmp/finab-conseiller.html
-          grep -q '/assets/index-' /tmp/finab-conseiller.html
-          curl -fsS https://abf.finablasolution.cloud/assets/$(grep -o 'index-[^" ]*\.js' /tmp/finab-conseiller.html | head -1) | grep -q 'api/pdf/fields'
+          curl -fsS --retry 10 --retry-delay 5 --retry-connrefused https://abf.finablasolution.cloud/conseiller -o /tmp/finab-conseiller.html
+          ASSET_PATH=$(grep -o '/assets/index-[^" ]*\.js' /tmp/finab-conseiller.html | head -1)
+          test -n "$ASSET_PATH"
+          curl -fsS --retry 10 --retry-delay 5 --retry-connrefused "https://abf.finablasolution.cloud$ASSET_PATH" | grep -q 'api/pdf/fields'
