@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .abf_mapping import build_abf_values
-from .pdf_fill import fill_acroform
+from .pdf_fill import fill_acroform, list_acroform_fields, update_acroform_fields
 from .schemas import (
     AbfGenerationRequest,
     AbfGenerationResult,
@@ -76,6 +76,11 @@ class PdfTextEdit(BaseModel):
 class PdfEditRequest(BaseModel):
     path: str
     edits: list[PdfTextEdit]
+
+
+class PdfFieldEditRequest(BaseModel):
+    path: str
+    fields: dict[str, str] = Field(default_factory=dict)
 
 
 def public_base_url() -> str:
@@ -486,6 +491,12 @@ def pdf_info(path: str, user: dict = Depends(current_paid_user)) -> dict:
         return {"page_count": doc.page_count, "filename": p.name}
 
 
+@app.get("/api/pdf/fields")
+def pdf_fields(path: str, user: dict = Depends(current_paid_user)) -> dict:
+    p = _resolve_output_pdf(path)
+    return {"path": str(p), "fields": list_acroform_fields(p)}
+
+
 @app.get("/api/pdf/page-image")
 def pdf_page_image(path: str, page: int = 0, token: str | None = None) -> FileResponse:
     user = _user_from_token(token)
@@ -557,6 +568,31 @@ def apply_pdf_edits(prospect_id: str, request: PdfEditRequest, user: dict = Depe
         "missing_fields": [],
         "layout_preserved": True,
     }
+    target_organization_id = prospect_record.get("organization_id") or user["organization_id"]
+    result = AbfGenerationResult(output_path=str(output), **report)
+    save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
+    return result
+
+
+@app.patch("/api/prospects/{prospect_id}/pdf-fields", response_model=AbfGenerationResult)
+def update_prospect_pdf_fields(
+    prospect_id: str, request: PdfFieldEditRequest, user: dict = Depends(current_paid_user)
+) -> AbfGenerationResult:
+    organization_id = None if user["role"] == "owner" else user["organization_id"]
+    try:
+        prospect_record = get_prospect(prospect_id, organization_id=organization_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prospect introuvable") from None
+    source = _resolve_output_pdf(request.path)
+    if not request.fields:
+        raise HTTPException(status_code=400, detail="Aucun champ PDF à modifier")
+
+    output = OUTPUT_DIR / f"{source.stem}_modifie_{uuid4().hex[:8]}.pdf"
+    try:
+        report = update_acroform_fields(source, output, request.fields)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="PDF introuvable") from None
+
     target_organization_id = prospect_record.get("organization_id") or user["organization_id"]
     result = AbfGenerationResult(output_path=str(output), **report)
     save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
