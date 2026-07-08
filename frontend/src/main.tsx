@@ -53,7 +53,7 @@ type ReviewState = {
   preference_notes: string;
   agent_notes: string;
 };
-type ProspectDetail = ProspectSummary & { payload: any; advisor_review?: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
+type ProspectDetail = ProspectSummary & { payload: any; advisor_review?: any; pdf_field_overrides?: Record<string, string>; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
 type PdfField = { name: string; value: string; type: string; page: number; rect: [number, number, number, number]; multiline: boolean; max_length: number; options: string[] };
 type AdminOverview = { organizations: number; users: number; active_users: number; admins?: number; unlimited_users?: number; prospects: number; documents: number; recent_prospects: ProspectSummary[]; plan_distribution?: Array<{ plan: string; subscription_status: string; c: number }> };
 type AdminUser = User & { organization: Organization };
@@ -407,9 +407,11 @@ function AdvisorDashboard() {
   // The PDF field edits live here (lifted out of the editor) so every save/
   // generate action can flush them, no matter which button the advisor clicks.
   function handlePdfFieldsLoaded(list: PdfField[]) {
-    const map = Object.fromEntries(list.map((field) => [field.name, field.value || '']));
-    setPdfValues(map);
-    setPdfOriginals(map);
+    const base = Object.fromEntries(list.map((field) => [field.name, field.value || '']));
+    // Reflect any saved-but-not-yet-generated edits so they survive a reload.
+    const merged = { ...base, ...(selected?.pdf_field_overrides || {}) };
+    setPdfValues(merged);
+    setPdfOriginals(merged);
   }
   function setPdfFieldValue(name: string, value: string) {
     setPdfValues((current) => ({ ...current, [name]: value }));
@@ -444,65 +446,43 @@ function AdvisorDashboard() {
     catch { setMessage('Impossible de charger ce prospect.'); }
     finally { setLoading(false); }
   }
-  function currentPdfPath() { return pdfPath || selected?.documents?.[0]?.output_path || ''; }
-
-  // Persist the advisor's direct PDF field edits (if any) before any other
-  // save/generate action, so those edits are never silently dropped.
-  async function flushPdfFieldEdits(): Promise<string | null> {
+  // Persist the advisor's direct PDF field edits as overrides only. This does
+  // NOT create a PDF or a document — the final PDF is produced only when the
+  // advisor clicks "Générer le PDF", so the workspace stays clean.
+  async function persistPdfOverrides(): Promise<Record<string, string> | null> {
     if (!selected || !token) return null;
-    const path = currentPdfPath();
     const diff = pdfFieldDiff();
-    if (!path || Object.keys(diff).length === 0) return null;
-    const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/pdf-fields`, { method: 'PATCH', body: JSON.stringify({ path, fields: diff }) }, token);
-    return result.output_path;
-  }
-
-  async function generateAbf() {
-    if (!selected || !token) return;
-    setLoading(true); setMessage('');
-    try {
-      await flushPdfFieldEdits();
-      setPdfPath('');
-      await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
-      await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
-      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
-      await refresh(selected.id);
-      setPdfPath(result.output_path);
-      setMessage('PDF final généré. Vos modifications directes du PDF ont été conservées.');
-    } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs ABF modifiables."); }
-    finally { setLoading(false); }
+    if (Object.keys(diff).length === 0) return null;
+    await api(`/api/prospects/${selected.id}/pdf-overrides`, { method: 'PATCH', body: JSON.stringify({ fields: diff }) }, token);
+    setSelected((current) => current ? { ...current, pdf_field_overrides: { ...(current.pdf_field_overrides || {}), ...diff } } : current);
+    return diff;
   }
 
   async function savePdfFields() {
     if (!selected || !token) return;
     setLoading(true); setMessage('');
     try {
-      const newPath = await flushPdfFieldEdits();
-      if (!newPath) { setMessage('Aucune modification à enregistrer dans le PDF.'); setLoading(false); return; }
-      await refresh(selected.id);
-      setPdfPath(newPath);
-      setMessage('Modifications du PDF enregistrées et rechargées ci-dessous.');
-    } catch { setMessage('Impossible d’enregistrer les modifications du PDF. Vérifiez les champs puis réessayez.'); }
+      const saved = await persistPdfOverrides();
+      if (!saved) { setMessage('Aucune modification à enregistrer.'); setLoading(false); return; }
+      setPdfOriginals(pdfValues); // clear the "modified" markers without reloading a PDF
+      setMessage('Modifications enregistrées. Cliquez sur « Générer le PDF » pour produire le document final.');
+    } catch { setMessage('Enregistrement impossible. Réessayez.'); }
     finally { setLoading(false); }
   }
 
-  async function saveAbfPageEdits() {
+  async function generateAbf() {
     if (!selected || !token) return;
     setLoading(true); setMessage('');
     try {
-      const flushedPath = await flushPdfFieldEdits();
+      await persistPdfOverrides();
       setPdfPath('');
-      const updatedProspect = await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
-      const updatedReview = await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
-      const merged = { ...updatedProspect, advisor_review: updatedReview.advisor_review, documents: updatedReview.documents || updatedProspect.documents };
-      setSelected(merged);
-      setEditForm(formFromPayload(merged.payload));
-      setReviewForm(reviewFromDetail(merged, session));
-      setEditing(false);
-      setMessage('Corrections enregistrées, y compris vos modifications directes du PDF.');
-      await refresh(merged.id);
-      if (flushedPath) setPdfPath(flushedPath);
-    } catch { setMessage('Enregistrement impossible. Vérifiez les champs obligatoires.'); }
+      await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
+      await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
+      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
+      await refresh(selected.id);
+      setPdfPath(result.output_path);
+      setMessage('PDF généré. Toutes vos modifications ont été prises en compte.');
+    } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs puis réessayez."); }
     finally { setLoading(false); }
   }
 
@@ -603,9 +583,8 @@ function AdvisorDashboard() {
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{latestPdfPath && <button className="inline-link" onClick={() => downloadPdf(latestPdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
-          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer les corrections</button>{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}<button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF final</button></div></section>
+          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions">{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}</div></section>
           <PdfFormEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} values={pdfValues} originals={pdfOriginals} onFieldsLoaded={handlePdfFieldsLoaded} onFieldChange={setPdfFieldValue} onReset={resetPdfFields} onSave={savePdfFields} onGenerate={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
-          <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
@@ -746,9 +725,9 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, values, originals,
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
       <div><p className="eyebrow">Éditeur PDF intégré</p><h2>Modifier directement les champs du PDF</h2><p>Cliquez dans n’importe quel champ affiché sur le PDF, corrigez la valeur, puis enregistrez. Les modifications sont écrites dans les vrais champs du formulaire ABF, sans repasser par le formulaire client.</p></div>
-      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Régénérer depuis le formulaire</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
+      <div className="edit-actions">{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
     </div>
-    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF final généré pour ce dossier.</strong><span>Remplissez ou corrigez les champs ABF ci-dessous, puis cliquez sur “Générer le PDF final”.</span></div>}
+    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF généré pour ce dossier.</strong><span>Cliquez sur « Générer le PDF » pour créer le document ABF à partir des informations du client, puis modifiez directement les champs affichés.</span><button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer le PDF</button></div>}
     {previewUrl && <>
       <div className="pdf-editor-toolbar">
         <button type="button" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Page précédente</button>
@@ -756,7 +735,8 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, values, originals,
         <button type="button" onClick={() => setPage(Math.min(pageCount - 1, page + 1))} disabled={page + 1 >= pageCount}>Page suivante</button>
         <div className="pdf-page-jump" aria-label="Accès rapide aux pages PDF">{pageIndexes.map((pageIndex) => <button key={pageIndex} type="button" className={pageIndex === page ? 'active' : ''} onClick={() => setPage(pageIndex)}>P{pageIndex + 1}</button>)}</div>
         <button type="button" onClick={onReset} disabled={changedCount === 0}>Annuler les modifications</button>
-        <button className="submit-button compact" type="button" disabled={loading || changedCount === 0} onClick={onSave}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
+        <button className="refresh-button" type="button" disabled={loading || changedCount === 0} onClick={onSave}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
+        <button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer le PDF</button>
       </div>
       <p className="pdf-helper">{fieldsLoading ? 'Chargement des champs du PDF…' : loadError || `Les ${fields.length} champs éditables du PDF sont superposés à l’aperçu ci-dessous. Modifiez-les directement, même sur téléphone, puis enregistrez. Champs modifiés : ${changedCount}.`}</p>
       <div className="pdf-canvas-shell all-pages">
@@ -784,76 +764,17 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, values, originals,
           </div>;
         })}
       </div>
+      <div className="pdf-editor-footer">
+        <span>{changedCount > 0 ? `${changedCount} champ(s) modifié(s) non enregistré(s).` : 'Aucune modification en attente.'}</span>
+        <div className="pdf-editor-footer-actions">
+          <button className="refresh-button" type="button" disabled={loading || changedCount === 0} onClick={onSave}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
+          <button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer le PDF</button>
+        </div>
+      </div>
     </>}
   </section>;
 }
 
-
-function EditableAbfPreview({ form, setForm, review, setReview, loading, onSave, onExport }: { form: FormState; setForm: (form: FormState) => void; review: ReviewState; setReview: (form: ReviewState) => void; loading: boolean; onSave: () => void; onExport: () => void }) {
-  const setClient = (key: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [key]: event.target.value });
-  const setAdvisor = (key: keyof ReviewState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setReview({ ...review, [key]: event.target.value });
-  const automaticCoverage = Math.max((numberValue(form.annualIncome) * numberValue(review.replacement_years)) - numberValue(form.totalAssets) + numberValue(form.totalDebts), 0);
-  const displayedCoverage = numberValue(review.final_recommended_coverage) || automaticCoverage;
-  return <section className="advisor-card abf-editor-card">
-    <div className="abf-editor-head">
-      <div><p className="eyebrow">ABF visible et modifiable dans l’espace</p><h2>Formulaire ABF à corriger ici</h2><p>Tapez directement dans les champs ci-dessous, même sur téléphone. Aucun clic sur un lien PDF n’est nécessaire pour modifier le dossier.</p></div>
-      <div className="edit-actions"><button className="refresh-button" type="button" disabled={loading} onClick={onSave}><CheckCircle2 size={16}/> Enregistrer</button><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer PDF final</button></div>
-    </div>
-    <div className="abf-paper">
-      <div className="abf-paper-title"><div><span>FINAB Solution</span><strong>ABF — Dossier client</strong></div><small>Document de travail conseiller</small></div>
-      <div className="abf-band">1. Identification du client</div>
-      <div className="abf-fields three">
-        <AbfField label="Nom" value={form.legalLastName} onChange={setClient('legalLastName')} />
-        <AbfField label="Prénoms" value={form.firstNames} onChange={setClient('firstNames')} />
-        <AbfField label="Date de naissance" value={form.dateOfBirth} onChange={setClient('dateOfBirth')} type="date" />
-        <AbfField label="Lieu de naissance" value={form.placeOfBirth} onChange={setClient('placeOfBirth')} />
-        <label className="abf-field"><span>Situation familiale</span><select value={form.maritalStatus} onChange={setClient('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
-        <AbfField label="Enfants à charge" value={form.dependents} onChange={setClient('dependents')} inputMode="numeric" />
-        <AbfField label="Arrivée au Canada" value={form.arrivalInCanada} onChange={setClient('arrivalInCanada')} type="date" />
-        <AbfField label="Téléphone" value={form.phone} onChange={setClient('phone')} />
-        <AbfField label="Courriel" value={form.email} onChange={setClient('email')} />
-      </div>
-      <AbfArea label="Adresse complète" value={form.address} onChange={setClient('address')} />
-      <div className="abf-band">2. Emploi, revenus et situation financière</div>
-      <div className="abf-fields two">
-        <AbfField label="Emploi / titre / poste" value={form.occupation} onChange={setClient('occupation')} />
-        <AbfField label="Adresse emploi" value={form.employerAddress} onChange={setClient('employerAddress')} />
-        <AbfField label="Revenu annuel" value={form.annualIncome} onChange={setClient('annualIncome')} inputMode="decimal" />
-        <AbfField label="Valeur totale des biens" value={form.totalAssets} onChange={setClient('totalAssets')} inputMode="decimal" />
-        <AbfField label="Total des dettes" value={form.totalDebts} onChange={setClient('totalDebts')} inputMode="decimal" />
-        <AbfField label="Budget mensuel confortable" value={form.acceptableBudget} onChange={setClient('acceptableBudget')} inputMode="decimal" />
-      </div>
-      <div className="abf-band">3. Assurance, santé et objectifs</div>
-      <div className="abf-fields two">
-        <label className="abf-field"><span>Assurance vie existante</span><select value={form.hasExistingInsurance} onChange={setClient('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
-        <AbfField label="Taille" value={form.height} onChange={setClient('height')} />
-        <AbfField label="Poids" value={form.weight} onChange={setClient('weight')} />
-        <AbfField label="Code postal" value={form.postalCode} onChange={setClient('postalCode')} />
-      </div>
-      <AbfArea label="Détails assurances / placements actuels" value={form.existingInsuranceDetails} onChange={setClient('existingInsuranceDetails')} />
-      <AbfArea label="Si aucune assurance : raison" value={form.noInsuranceReason} onChange={setClient('noInsuranceReason')} />
-      <AbfArea label="Disponibilités" value={form.availability} onChange={setClient('availability')} />
-      <AbfArea label="Projets prioritaires / besoins familiaux" value={form.priorityProjects} onChange={setClient('priorityProjects')} />
-      <div className="abf-band">4. Recommandation du conseiller</div>
-      <div className="abf-calculation-strip"><div><span>Couverture calculée</span><strong>{money(displayedCoverage)} $</strong></div><div><span>Années de revenu</span><strong>{review.replacement_years || '0'}</strong></div><div><span>Budget client</span><strong>{money(form.acceptableBudget)} $/mois</strong></div></div>
-      <div className="abf-fields three">
-        <AbfField label="Conseiller" value={review.advisor_name} onChange={setAdvisor('advisor_name')} />
-        <AbfField label="Téléphone conseiller" value={review.advisor_phone} onChange={setAdvisor('advisor_phone')} />
-        <AbfField label="Courriel conseiller" value={review.advisor_email} onChange={setAdvisor('advisor_email')} />
-        <AbfField label="Date validation" value={review.signed_date} onChange={setAdvisor('signed_date')} type="date" />
-        <AbfField label="Années remplacement revenu" value={review.replacement_years} onChange={setAdvisor('replacement_years')} inputMode="numeric" />
-        <AbfField label="Couverture finale recommandée" value={review.final_recommended_coverage} onChange={setAdvisor('final_recommended_coverage')} inputMode="decimal" placeholder={`${money(automaticCoverage)} $ automatique`} />
-        <AbfField label="Budget recommandation 1" value={review.recommendation_1_budget} onChange={setAdvisor('recommendation_1_budget')} inputMode="decimal" />
-        <AbfField label="Budget recommandation 2" value={review.recommendation_2_budget} onChange={setAdvisor('recommendation_2_budget')} inputMode="decimal" />
-        <AbfField label="Budget préféré client" value={review.client_preference_budget} onChange={setAdvisor('client_preference_budget')} inputMode="decimal" />
-      </div>
-      <AbfArea label="Notes recommandation 1" value={review.recommendation_1_notes} onChange={setAdvisor('recommendation_1_notes')} />
-      <AbfArea label="Notes recommandation 2" value={review.recommendation_2_notes} onChange={setAdvisor('recommendation_2_notes')} />
-      <AbfArea label="Préférence client / justification" value={review.preference_notes} onChange={setAdvisor('preference_notes')} />
-      <AbfArea label="Notes finales du conseiller" value={review.agent_notes} onChange={setAdvisor('agent_notes')} />
-    </div>
-  </section>;
-}
 
 function AbfField({ label, value, onChange, type = 'text', inputMode, placeholder }: { label: string; value: string; onChange: (event: React.ChangeEvent<HTMLInputElement>) => void; type?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']; placeholder?: string }) {
   return <label className="abf-field"><span>{label}</span><input type={type} value={value} onChange={onChange} inputMode={inputMode} placeholder={placeholder} /></label>;

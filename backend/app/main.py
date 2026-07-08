@@ -85,6 +85,10 @@ class PdfFieldEditRequest(BaseModel):
     fields: dict[str, str] = Field(default_factory=dict)
 
 
+class PdfOverridesRequest(BaseModel):
+    fields: dict[str, str] = Field(default_factory=dict)
+
+
 def public_base_url() -> str:
     return os.getenv("FINAB_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 
@@ -575,6 +579,26 @@ def apply_pdf_edits(prospect_id: str, request: PdfEditRequest, user: dict = Depe
     result = AbfGenerationResult(output_path=str(output), **report)
     save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
     return result
+
+
+@app.patch("/api/prospects/{prospect_id}/pdf-overrides")
+def save_prospect_pdf_overrides(
+    prospect_id: str, request: PdfOverridesRequest, user: dict = Depends(current_paid_user)
+) -> dict:
+    """Store the counselor's direct PDF field edits without producing a new PDF.
+
+    Saving only records the overrides; the final document is created solely when
+    the counselor clicks "Générer le PDF", so the workspace is not flooded with
+    intermediate PDF versions.
+    """
+    organization_id = None if user["role"] == "owner" else user["organization_id"]
+    if not request.fields:
+        raise HTTPException(status_code=400, detail="Aucune modification PDF à enregistrer")
+    try:
+        overrides = merge_pdf_field_overrides(prospect_id, request.fields, organization_id=organization_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prospect introuvable") from None
+    return {"pdf_field_overrides": overrides}
 
 
 @app.patch("/api/prospects/{prospect_id}/pdf-fields", response_model=AbfGenerationResult)
