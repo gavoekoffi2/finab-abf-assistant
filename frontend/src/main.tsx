@@ -400,7 +400,28 @@ function AdvisorDashboard() {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<FormState>(emptyForm);
   const [reviewForm, setReviewForm] = useState<ReviewState>(emptyReview);
+  const [pdfValues, setPdfValues] = useState<Record<string, string>>({});
+  const [pdfOriginals, setPdfOriginals] = useState<Record<string, string>>({});
   const token = session?.token;
+
+  // The PDF field edits live here (lifted out of the editor) so every save/
+  // generate action can flush them, no matter which button the advisor clicks.
+  function handlePdfFieldsLoaded(list: PdfField[]) {
+    const map = Object.fromEntries(list.map((field) => [field.name, field.value || '']));
+    setPdfValues(map);
+    setPdfOriginals(map);
+  }
+  function setPdfFieldValue(name: string, value: string) {
+    setPdfValues((current) => ({ ...current, [name]: value }));
+  }
+  function resetPdfFields() { setPdfValues(pdfOriginals); }
+  function pdfFieldDiff(): Record<string, string> {
+    const diff: Record<string, string> = {};
+    for (const name of Object.keys(pdfValues)) {
+      if ((pdfValues[name] ?? '') !== (pdfOriginals[name] ?? '')) diff[name] = pdfValues[name] ?? '';
+    }
+    return diff;
+  }
 
   async function refresh(selectId?: string) {
     if (!token) return;
@@ -423,36 +444,54 @@ function AdvisorDashboard() {
     catch { setMessage('Impossible de charger ce prospect.'); }
     finally { setLoading(false); }
   }
+  function currentPdfPath() { return pdfPath || selected?.documents?.[0]?.output_path || ''; }
+
+  // Persist the advisor's direct PDF field edits (if any) before any other
+  // save/generate action, so those edits are never silently dropped.
+  async function flushPdfFieldEdits(): Promise<string | null> {
+    if (!selected || !token) return null;
+    const path = currentPdfPath();
+    const diff = pdfFieldDiff();
+    if (!path || Object.keys(diff).length === 0) return null;
+    const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/pdf-fields`, { method: 'PATCH', body: JSON.stringify({ path, fields: diff }) }, token);
+    return result.output_path;
+  }
+
   async function generateAbf() {
     if (!selected || !token) return;
-    setLoading(true); setMessage(''); setPdfPath('');
+    setLoading(true); setMessage('');
     try {
+      await flushPdfFieldEdits();
+      setPdfPath('');
       await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
       await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       await refresh(selected.id);
       setPdfPath(result.output_path);
-      setMessage('ABF enregistré et PDF final généré. Vous pouvez maintenant corriger visuellement le PDF dans l’éditeur intégré, puis exporter la version modifiée.');
+      setMessage('PDF final généré. Vos modifications directes du PDF ont été conservées.');
     } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs ABF modifiables."); }
     finally { setLoading(false); }
   }
 
-  async function updatePdfFields(path: string, fields: Record<string, string>) {
-    if (!selected || !token || !path || Object.keys(fields).length === 0) return;
+  async function savePdfFields() {
+    if (!selected || !token) return;
     setLoading(true); setMessage('');
     try {
-      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/pdf-fields`, { method: 'PATCH', body: JSON.stringify({ path, fields }) }, token);
+      const newPath = await flushPdfFieldEdits();
+      if (!newPath) { setMessage('Aucune modification à enregistrer dans le PDF.'); setLoading(false); return; }
       await refresh(selected.id);
-      setPdfPath(result.output_path);
-      setMessage('Champs du PDF mis à jour. Les modifications sont enregistrées et rechargées ci-dessous.');
+      setPdfPath(newPath);
+      setMessage('Modifications du PDF enregistrées et rechargées ci-dessous.');
     } catch { setMessage('Impossible d’enregistrer les modifications du PDF. Vérifiez les champs puis réessayez.'); }
     finally { setLoading(false); }
   }
 
   async function saveAbfPageEdits() {
     if (!selected || !token) return;
-    setLoading(true); setMessage(''); setPdfPath('');
+    setLoading(true); setMessage('');
     try {
+      const flushedPath = await flushPdfFieldEdits();
+      setPdfPath('');
       const updatedProspect = await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
       const updatedReview = await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       const merged = { ...updatedProspect, advisor_review: updatedReview.advisor_review, documents: updatedReview.documents || updatedProspect.documents };
@@ -460,8 +499,9 @@ function AdvisorDashboard() {
       setEditForm(formFromPayload(merged.payload));
       setReviewForm(reviewFromDetail(merged, session));
       setEditing(false);
-      setMessage('Corrections enregistrées. Le prochain PDF ABF reprendra exactement ces champs.');
+      setMessage('Corrections enregistrées, y compris vos modifications directes du PDF.');
       await refresh(merged.id);
+      if (flushedPath) setPdfPath(flushedPath);
     } catch { setMessage('Enregistrement impossible. Vérifiez les champs obligatoires.'); }
     finally { setLoading(false); }
   }
@@ -564,7 +604,7 @@ function AdvisorDashboard() {
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
           <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer les corrections</button>{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}<button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF final</button></div></section>
-          <PdfFormEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} onGenerate={generateAbf} onUpdateFields={updatePdfFields} onDownload={() => downloadPdf(latestPdfPath)} />
+          <PdfFormEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} values={pdfValues} originals={pdfOriginals} onFieldsLoaded={handlePdfFieldsLoaded} onFieldChange={setPdfFieldValue} onReset={resetPdfFields} onSave={savePdfFields} onGenerate={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
           <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
@@ -673,17 +713,18 @@ function pdfViewerUrl(path: string, token?: string) {
   return path && token ? `/abf/view?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}#zoom=page-width` : '';
 }
 
-function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpdateFields, onDownload }: { previewUrl: string; pdfPath: string; token: string; loading: boolean; onGenerate: () => void; onUpdateFields: (path: string, fields: Record<string, string>) => void; onDownload: () => void }) {
+function PdfFormEditor({ previewUrl, pdfPath, token, loading, values, originals, onFieldsLoaded, onFieldChange, onReset, onSave, onGenerate, onDownload }: { previewUrl: string; pdfPath: string; token: string; loading: boolean; values: Record<string, string>; originals: Record<string, string>; onFieldsLoaded: (fields: PdfField[]) => void; onFieldChange: (name: string, value: string) => void; onReset: () => void; onSave: () => void; onGenerate: () => void; onDownload: () => void }) {
   const [pageCount, setPageCount] = useState(1);
   const [page, setPage] = useState(0);
   const [fields, setFields] = useState<PdfField[]>([]);
-  const [values, setValues] = useState<Record<string, string>>({});
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const loadedRef = React.useRef(onFieldsLoaded);
+  loadedRef.current = onFieldsLoaded;
 
   useEffect(() => {
-    setPage(0); setFields([]); setValues({}); setLoadError('');
-    if (!pdfPath || !token) return;
+    setPage(0); setFields([]); setLoadError('');
+    if (!pdfPath || !token) { loadedRef.current([]); return; }
     setFieldsLoading(true);
     Promise.all([
       api<{ page_count: number }>(`/api/pdf/info?path=${encodeURIComponent(pdfPath)}`, undefined, token),
@@ -692,7 +733,7 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpda
       .then(([info, data]) => {
         setPageCount(Math.max(info.page_count || 1, 1));
         setFields(data.fields || []);
-        setValues(Object.fromEntries((data.fields || []).map((field) => [field.name, field.value || ''])));
+        loadedRef.current(data.fields || []);
       })
       .catch(() => setLoadError('Impossible de charger les champs du PDF pour ce dossier.'))
       .finally(() => setFieldsLoading(false));
@@ -700,17 +741,7 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpda
 
   const pageIndexes = Array.from({ length: pageCount }, (_, index) => index);
   const imageUrlForPage = (pageIndex: number) => pdfPath && token ? `/api/pdf/page-image?path=${encodeURIComponent(pdfPath)}&page=${pageIndex}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(pdfPath)}` : '';
-  const originalByName = useMemo(() => Object.fromEntries(fields.map((field) => [field.name, field.value || ''])), [fields]);
-  const changedFields = useMemo(() => {
-    const diff: Record<string, string> = {};
-    for (const field of fields) {
-      if ((values[field.name] ?? '') !== (originalByName[field.name] ?? '')) diff[field.name] = values[field.name] ?? '';
-    }
-    return diff;
-  }, [fields, values, originalByName]);
-  const changedCount = Object.keys(changedFields).length;
-  function setFieldValue(name: string, value: string) { setValues((current) => ({ ...current, [name]: value })); }
-  function resetChanges() { setValues(Object.fromEntries(fields.map((field) => [field.name, field.value || '']))); }
+  const changedCount = fields.reduce((count, field) => count + ((values[field.name] ?? '') !== (originals[field.name] ?? '') ? 1 : 0), 0);
 
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
@@ -724,8 +755,8 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpda
         <strong>Page {page + 1} / {pageCount}</strong>
         <button type="button" onClick={() => setPage(Math.min(pageCount - 1, page + 1))} disabled={page + 1 >= pageCount}>Page suivante</button>
         <div className="pdf-page-jump" aria-label="Accès rapide aux pages PDF">{pageIndexes.map((pageIndex) => <button key={pageIndex} type="button" className={pageIndex === page ? 'active' : ''} onClick={() => setPage(pageIndex)}>P{pageIndex + 1}</button>)}</div>
-        <button type="button" onClick={resetChanges} disabled={changedCount === 0}>Annuler les modifications</button>
-        <button className="submit-button compact" type="button" disabled={loading || changedCount === 0} onClick={() => onUpdateFields(pdfPath, changedFields)}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
+        <button type="button" onClick={onReset} disabled={changedCount === 0}>Annuler les modifications</button>
+        <button className="submit-button compact" type="button" disabled={loading || changedCount === 0} onClick={onSave}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
       </div>
       <p className="pdf-helper">{fieldsLoading ? 'Chargement des champs du PDF…' : loadError || `Les ${fields.length} champs éditables du PDF sont superposés à l’aperçu ci-dessous. Modifiez-les directement, même sur téléphone, puis enregistrez. Champs modifiés : ${changedCount}.`}</p>
       <div className="pdf-canvas-shell all-pages">
@@ -739,14 +770,14 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpda
               {pageFields.map((field) => {
                 const [x0, y0, x1, y1] = field.rect;
                 const style: React.CSSProperties = { left: `${x0 * 100}%`, top: `${y0 * 100}%`, width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%` };
-                const changed = (values[field.name] ?? '') !== (originalByName[field.name] ?? '');
+                const changed = (values[field.name] ?? '') !== (originals[field.name] ?? '');
                 const common = { value: values[field.name] ?? '', title: field.name, onFocus: () => setPage(pageIndex), 'aria-label': field.name };
                 return <div className={changed ? 'pdf-field-overlay changed' : 'pdf-field-overlay'} key={`${field.name}-${x0}-${y0}`} style={style}>
                   {field.multiline
-                    ? <textarea {...common} onChange={(event) => setFieldValue(field.name, event.target.value)} />
+                    ? <textarea {...common} onChange={(event) => onFieldChange(field.name, event.target.value)} />
                     : field.options && field.options.length > 0
-                      ? <select {...common} onChange={(event) => setFieldValue(field.name, event.target.value)}><option value="">—</option>{field.options.map((option) => <option key={option} value={option}>{option}</option>)}</select>
-                      : <input {...common} maxLength={field.max_length || undefined} onChange={(event) => setFieldValue(field.name, event.target.value)} />}
+                      ? <select {...common} onChange={(event) => onFieldChange(field.name, event.target.value)}><option value="">—</option>{field.options.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+                      : <input {...common} maxLength={field.max_length || undefined} onChange={(event) => onFieldChange(field.name, event.target.value)} />}
                 </div>;
               })}
             </div>
