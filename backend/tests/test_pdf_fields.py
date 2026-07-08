@@ -136,5 +136,13 @@ def test_edit_filled_pdf_fields_end_to_end(tmp_path: Path, monkeypatch: pytest.M
     )
     assert empty.status_code == 400
 
-    Path(source_path).unlink(missing_ok=True)
-    Path(output_path).unlink(missing_ok=True)
+    # Regenerating the final PDF must keep the direct field edit instead of
+    # reverting to the form-derived value.
+    regenerated = client.post(f"/api/prospects/{prospect_id}/generate-abf", headers=headers, json={})
+    assert regenerated.status_code == 200
+    regenerated_path = regenerated.json()["output_path"]
+    regen_fields = {field["name"]: field["value"] for field in list_acroform_fields(Path(regenerated_path))}
+    assert regen_fields["Advisor Name"] == "Conseiller Corrigé"
+
+    for path in (source_path, output_path, regenerated_path):
+        Path(path).unlink(missing_ok=True)

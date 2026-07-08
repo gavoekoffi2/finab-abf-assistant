@@ -31,6 +31,7 @@ from .storage import (
     create_user_by_owner,
     default_review,
     delete_user_by_owner,
+    get_pdf_field_overrides,
     get_user_by_id,
     get_prospect,
     get_session_user,
@@ -40,6 +41,7 @@ from .storage import (
     list_organizations,
     list_prospects,
     list_users,
+    merge_pdf_field_overrides,
     prospect_review,
     prospect_submission,
     register_account,
@@ -477,7 +479,8 @@ def generate_prospect_abf(
     organization = get_organization(target_organization_id)
     if review is None or review == AdvisorReview():
         review = prospect_review(prospect_id, organization_id=organization_id, organization=organization)
-    result = _generate_abf(AbfGenerationRequest(prospect=prospect, review=review))
+    overrides = get_pdf_field_overrides(prospect_id, organization_id=organization_id)
+    result = _generate_abf(AbfGenerationRequest(prospect=prospect, review=review), overrides=overrides)
     save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
     return result
 
@@ -593,6 +596,10 @@ def update_prospect_pdf_fields(
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="PDF introuvable") from None
 
+    # Remember the manual edits so a later "Générer le PDF final" keeps them
+    # instead of reverting to the values derived from the client form.
+    merge_pdf_field_overrides(prospect_id, request.fields, organization_id=organization_id)
+
     target_organization_id = prospect_record.get("organization_id") or user["organization_id"]
     result = AbfGenerationResult(output_path=str(output), **report)
     save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
@@ -609,8 +616,12 @@ def generate_abf(request: AbfGenerationRequest) -> AbfGenerationResult:
     return _generate_abf(request)
 
 
-def _generate_abf(request: AbfGenerationRequest) -> AbfGenerationResult:
+def _generate_abf(request: AbfGenerationRequest, overrides: dict | None = None) -> AbfGenerationResult:
     values = build_abf_values(request.prospect, request.review)
+    if overrides:
+        # The counselor's direct PDF field edits win over the form-derived
+        # values so regenerating the ABF keeps every manual correction.
+        values.update({name: str(value) for name, value in overrides.items()})
     safe_name = "_".join(request.prospect.identity.full_name.split()) or "client"
     output = OUTPUT_DIR / f"ABF_{safe_name}_{uuid4().hex[:8]}.pdf"
     report = fill_acroform(TEMPLATE, output, values)
