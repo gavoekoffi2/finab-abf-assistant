@@ -46,11 +46,18 @@ class ContactInfo(BaseModel):
     postal_code: str = ""
 
 
+class IncomeType(str, Enum):
+    annual = "annuel"
+    hourly = "horaire"
+
+
 class EmploymentInfo(BaseModel):
     occupation: str = ""
     employer_name: str = ""
     employer_address: str = ""
+    income_type: IncomeType = IncomeType.annual
     annual_income: float = Field(default=0, ge=0)
+    hourly_rate: float = Field(default=0, ge=0)
     monthly_net_income: float = Field(default=0, ge=0)
 
 
@@ -79,11 +86,26 @@ class InsuranceInfo(BaseModel):
 
 class GoalsInfo(BaseModel):
     short_term_goals: str = ""
+    medium_term_goals: str = ""
     long_term_goals: str = ""
+    current_financial_situation: str = ""
     family_need_if_death: str = ""
+    additional_info: str = ""
     priority_projects: str = ""
     acceptable_monthly_budget: float = Field(default=0, ge=0)
     client_preference: str = ""
+
+
+class OwnerInfo(BaseModel):
+    """Cover-page owner block. When the insured is also the owner the
+    'Propriétaire' section is left blank; otherwise the insured is the third
+    party at the top and this owner (the paying client) appears in the middle."""
+
+    insured_is_owner: bool = True
+    name: str = ""
+    relationship: str = ""
+    email: str = ""
+    phone: str = ""
 
 
 class HealthInfo(BaseModel):
@@ -102,6 +124,7 @@ class MeetingInfo(BaseModel):
 class ProspectSubmission(BaseModel):
     identity: ClientIdentity
     contact: ContactInfo = ContactInfo()
+    owner: OwnerInfo = OwnerInfo()
     employment: EmploymentInfo = EmploymentInfo()
     financial: FinancialInfo = FinancialInfo()
     insurance: InsuranceInfo = InsuranceInfo()
@@ -122,8 +145,9 @@ class AdvisorReview(BaseModel):
     advisor_phone: str = "4383345252"
     advisor_email: str = "KOFFI.AKPOBI@MYGREATWAY.CA"
     signed_date: date = Field(default_factory=date.today)
-    replacement_years: int = Field(default=10, ge=0, le=50)
+    replacement_years: int = Field(default=0, ge=0, le=90)
     final_recommended_coverage: float = Field(default=0, ge=0)
+    critical_illness_amount: float = Field(default=30000, ge=0)
     recommendation_1_budget: float = Field(default=0, ge=0)
     recommendation_2_budget: float = Field(default=0, ge=0)
     client_preference_budget: float = Field(default=0, ge=0)

@@ -888,13 +888,15 @@ def list_documents(prospect_id: str, organization_id: str | None = None) -> list
 
 
 def default_review(prospect: ProspectSubmission, organization: dict | None = None) -> AdvisorReview:
+    from .calculations import age_on, suggested_replacement_years
+
     organization = organization or DEFAULT_ORG
     return AdvisorReview(
         reviewed_by_advisor=True,
         advisor_name=organization.get("advisor_name") or DEFAULT_ORG["advisor_name"],
         advisor_phone=organization.get("advisor_phone") or DEFAULT_ORG["advisor_phone"],
         advisor_email=organization.get("advisor_email") or DEFAULT_ORG["advisor_email"],
-        replacement_years=10,
+        replacement_years=suggested_replacement_years(age_on(prospect.identity.date_of_birth)),
         final_recommended_coverage=0,
         recommendation_1_budget=prospect.goals.acceptable_monthly_budget,
         recommendation_2_budget=prospect.goals.acceptable_monthly_budget * 1.5,

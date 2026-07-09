@@ -7,17 +7,25 @@ type FormState = {
   legalLastName: string;
   firstNames: string;
   dateOfBirth: string;
+  sex: string;
   placeOfBirth: string;
+  residencyStatus: string;
   maritalStatus: string;
   dependents: string;
   arrivalInCanada: string;
+  insuredIsOwner: string;
+  ownerName: string;
+  ownerRelationship: string;
   phone: string;
   email: string;
   address: string;
   postalCode: string;
   occupation: string;
+  employerName: string;
   employerAddress: string;
+  incomeType: string;
   annualIncome: string;
+  hourlyRate: string;
   totalAssets: string;
   totalDebts: string;
   hasExistingInsurance: string;
@@ -27,6 +35,11 @@ type FormState = {
   height: string;
   weight: string;
   availability: string;
+  shortTermGoals: string;
+  mediumTermGoals: string;
+  longTermGoals: string;
+  currentFinancialSituation: string;
+  familyNeedIfDeath: string;
   priorityProjects: string;
 };
 
@@ -61,7 +74,7 @@ type AdminUser = User & { organization: Organization };
 const AUTH_KEY = 'finab_abf_session';
 
 const emptyForm: FormState = {
-  legalLastName: '', firstNames: '', dateOfBirth: '', placeOfBirth: '', maritalStatus: '', dependents: '', arrivalInCanada: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerAddress: '', annualIncome: '', totalAssets: '', totalDebts: '', hasExistingInsurance: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', priorityProjects: '',
+  legalLastName: '', firstNames: '', dateOfBirth: '', sex: '', placeOfBirth: '', residencyStatus: '', maritalStatus: '', dependents: '', arrivalInCanada: '', insuredIsOwner: 'oui', ownerName: '', ownerRelationship: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerName: '', employerAddress: '', incomeType: 'annuel', annualIncome: '', hourlyRate: '', totalAssets: '', totalDebts: '', hasExistingInsurance: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', shortTermGoals: '', mediumTermGoals: '', longTermGoals: '', currentFinancialSituation: '', familyNeedIfDeath: '', priorityProjects: '',
 };
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const emptyReview: ReviewState = {
@@ -107,12 +120,13 @@ function payloadFromForm(form: FormState) {
   const parsedAddress = parseAddress(form.address);
   const hasInsurance = form.hasExistingInsurance === 'oui';
   return {
-    identity: { legal_last_name: form.legalLastName, first_names: form.firstNames, date_of_birth: form.dateOfBirth, sex: 'Non précisé', place_of_birth: form.placeOfBirth, arrival_in_canada: form.arrivalInCanada || null, residency_status: '', marital_status: form.maritalStatus || 'autre', dependents_count: numberValue(form.dependents) },
+    identity: { legal_last_name: form.legalLastName, first_names: form.firstNames, date_of_birth: form.dateOfBirth, sex: form.sex || 'Non précisé', place_of_birth: form.placeOfBirth, arrival_in_canada: form.arrivalInCanada || null, residency_status: form.residencyStatus, marital_status: form.maritalStatus || 'autre', dependents_count: numberValue(form.dependents) },
     contact: { phone: form.phone, email: form.email, address: parsedAddress.address, city: parsedAddress.city, province: parsedAddress.province, postal_code: form.postalCode },
-    employment: { occupation: form.occupation, employer_name: '', employer_address: form.employerAddress, annual_income: numberValue(form.annualIncome), monthly_net_income: 0 },
+    owner: { insured_is_owner: form.insuredIsOwner !== 'non', name: form.ownerName, relationship: form.ownerRelationship, email: '', phone: '' },
+    employment: { occupation: form.occupation, employer_name: form.employerName, employer_address: form.employerAddress, income_type: form.incomeType === 'horaire' ? 'horaire' : 'annuel', annual_income: numberValue(form.annualIncome), hourly_rate: numberValue(form.hourlyRate), monthly_net_income: 0 },
     financial: { total_assets: numberValue(form.totalAssets), cash_savings: 0, personal_property: numberValue(form.totalAssets), total_debts: numberValue(form.totalDebts), credit_cards: 0, car_loan: 0, student_loan: 0, personal_loan: 0, mortgage: 0, monthly_expenses: 0, monthly_debt_repayment: 0, monthly_savings: 0 },
     insurance: { has_existing_life_insurance: hasInsurance, existing_life_coverage: 0, existing_monthly_premium: 0, existing_retirement_savings_note: form.existingInsuranceDetails, no_insurance_reason: form.noInsuranceReason },
-    goals: { short_term_goals: form.priorityProjects, long_term_goals: form.priorityProjects, family_need_if_death: form.priorityProjects, priority_projects: form.priorityProjects, acceptable_monthly_budget: numberValue(form.acceptableBudget), client_preference: form.acceptableBudget },
+    goals: { short_term_goals: form.shortTermGoals, medium_term_goals: form.mediumTermGoals, long_term_goals: form.longTermGoals, current_financial_situation: form.currentFinancialSituation, family_need_if_death: form.familyNeedIfDeath, additional_info: form.priorityProjects, priority_projects: form.priorityProjects, acceptable_monthly_budget: numberValue(form.acceptableBudget), client_preference: form.acceptableBudget },
     health: { height: form.height, weight: form.weight, smoker: null, health_notes: '' },
     meeting: { availability: form.availability, preferred_mode: '', consent_acknowledged: true },
   };
@@ -126,17 +140,25 @@ function formFromPayload(payload: any): FormState {
     legalLastName: payload?.identity?.legal_last_name || '',
     firstNames: payload?.identity?.first_names || '',
     dateOfBirth: payload?.identity?.date_of_birth || '',
+    sex: payload?.identity?.sex && payload.identity.sex !== 'Non précisé' ? payload.identity.sex : '',
     placeOfBirth: payload?.identity?.place_of_birth || '',
+    residencyStatus: payload?.identity?.residency_status || '',
     maritalStatus: payload?.identity?.marital_status || '',
     dependents: String(payload?.identity?.dependents_count ?? ''),
     arrivalInCanada: payload?.identity?.arrival_in_canada || '',
+    insuredIsOwner: payload?.owner?.insured_is_owner === false ? 'non' : 'oui',
+    ownerName: payload?.owner?.name || '',
+    ownerRelationship: payload?.owner?.relationship || '',
     phone: contact.phone || '',
     email: contact.email || '',
     address,
     postalCode: contact.postal_code || '',
     occupation: payload?.employment?.occupation || '',
+    employerName: payload?.employment?.employer_name || '',
     employerAddress: payload?.employment?.employer_address || '',
+    incomeType: payload?.employment?.income_type === 'horaire' ? 'horaire' : 'annuel',
     annualIncome: String(payload?.employment?.annual_income || ''),
+    hourlyRate: String(payload?.employment?.hourly_rate || ''),
     totalAssets: String(payload?.financial?.total_assets || ''),
     totalDebts: String(payload?.financial?.total_debts || ''),
     hasExistingInsurance: payload?.insurance?.has_existing_life_insurance ? 'oui' : 'non',
@@ -146,7 +168,12 @@ function formFromPayload(payload: any): FormState {
     height: payload?.health?.height || '',
     weight: payload?.health?.weight || '',
     availability: payload?.meeting?.availability || '',
-    priorityProjects: payload?.goals?.priority_projects || '',
+    shortTermGoals: payload?.goals?.short_term_goals || '',
+    mediumTermGoals: payload?.goals?.medium_term_goals || '',
+    longTermGoals: payload?.goals?.long_term_goals || '',
+    currentFinancialSituation: payload?.goals?.current_financial_situation || '',
+    familyNeedIfDeath: payload?.goals?.family_need_if_death || '',
+    priorityProjects: payload?.goals?.priority_projects || payload?.goals?.additional_info || '',
   };
 }
 
@@ -230,10 +257,15 @@ function PublicForm() {
           <label>Nom de famille<input value={form.legalLastName} onChange={set('legalLastName')} autoComplete="family-name" /></label>
           <label>Prénoms<input value={form.firstNames} onChange={set('firstNames')} autoComplete="given-name" /></label>
           <label>Date de naissance<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
-          <label>Lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+          <label>Sexe<select value={form.sex} onChange={set('sex')}><option value="">Sélectionner</option><option value="Homme">Homme</option><option value="Femme">Femme</option><option value="Non précisé">Préfère ne pas préciser</option></select></label>
+          <label>Pays / lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+          <label>Statut de résident<input value={form.residencyStatus} onChange={set('residencyStatus')} placeholder="Citoyen, résident permanent, demandeur d'asile…" /></label>
           <label>Situation familiale<select value={form.maritalStatus} onChange={set('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
           <label>Nombre d’enfants à charge<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
           <label>Date d'arrivée au Canada<input type="date" value={form.arrivalInCanada} onChange={set('arrivalInCanada')} /></label>
+          <label className="span-2">Souscrivez-vous cette assurance pour vous-même ?<select value={form.insuredIsOwner} onChange={set('insuredIsOwner')}><option value="oui">Oui, je suis l'assuré et le propriétaire</option><option value="non">Non, je souscris pour une autre personne</option></select></label>
+          {form.insuredIsOwner === 'non' && <label>Votre nom (propriétaire payeur)<input value={form.ownerName} onChange={set('ownerName')} placeholder="Nom de la personne qui paie" /></label>}
+          {form.insuredIsOwner === 'non' && <label>Votre lien avec l'assuré<input value={form.ownerRelationship} onChange={set('ownerRelationship')} placeholder="Ex: conjoint, parent, ami…" /></label>}
         </div></div>
         <div className="form-section"><h2>Coordonnées</h2><div className="form-grid">
           <label>Téléphone<input value={form.phone} onChange={set('phone')} autoComplete="tel" /></label>
@@ -243,8 +275,12 @@ function PublicForm() {
         </div></div>
         <div className="form-section"><h2>Emploi et revenu</h2><div className="form-grid">
           <label className="span-2">Emploi actuel, titre et poste<input value={form.occupation} onChange={set('occupation')} placeholder="Ex: Préposé aux bénéficiaires, infirmier, entrepreneur…" /></label>
+          <label className="span-2">Nom de l'employeur<input value={form.employerName} onChange={set('employerName')} placeholder="Ex: Bar Burrito, CHSLD Montréal…" /></label>
           <label className="span-2">Adresse de votre emploi actuel<input value={form.employerAddress} onChange={set('employerAddress')} placeholder="Rue, ville et code postal" /></label>
-          <label className="span-2">Revenu annuel estimé<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" placeholder="Ex: 40 000 $" /></label>
+          <label>Votre revenu est<select value={form.incomeType} onChange={set('incomeType')}><option value="annuel">Annuel</option><option value="horaire">Horaire (taux de l'heure)</option></select></label>
+          {form.incomeType === 'horaire'
+            ? <label>Taux horaire net<input value={form.hourlyRate} onChange={set('hourlyRate')} inputMode="decimal" placeholder="Ex: 25 $ / h — calculé sur 40 h × 52 sem." /></label>
+            : <label>Revenu annuel net estimé<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" placeholder="Ex: 40 000 $" /></label>}
         </div></div>
         <div className="form-section"><h2>Situation financière</h2><div className="form-grid">
           <label className="span-2">Valeur totale approximative de vos biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" placeholder="Auto, épargne, biens personnels…" /></label>
@@ -256,11 +292,18 @@ function PublicForm() {
           <label className="span-2">Si vous n’avez pas d’assurance, quelle en est la raison ?<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
           <label className="span-2">Budget mensuel confortable pour vos protections et votre épargne<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" placeholder="Ex: 150 $ / mois" /></label>
         </div></div>
+        <div className="form-section"><h2>Objectifs financiers</h2><div className="form-grid">
+          <label className="span-2">Objectifs à court terme<textarea value={form.shortTermGoals} onChange={set('shortTermGoals')} placeholder="Ex: régulariser mes documents, fonder ma famille…" /></label>
+          <label className="span-2">Objectifs à moyen terme<textarea value={form.mediumTermGoals} onChange={set('mediumTermGoals')} placeholder="Ex: acheter une voiture, épargner pour un projet…" /></label>
+          <label className="span-2">Objectifs à long terme<textarea value={form.longTermGoals} onChange={set('longTermGoals')} placeholder="Ex: immobilier, entrepreneuriat, liberté financière…" /></label>
+          <label className="span-2">Comment décririez-vous votre situation financière actuelle ?<textarea value={form.currentFinancialSituation} onChange={set('currentFinancialSituation')} placeholder="Ex: acceptable, en construction, stable…" /></label>
+          <label className="span-2">En cas de décès prématuré, quel serait le besoin immédiat de votre famille ?<textarea value={form.familyNeedIfDeath} onChange={set('familyNeedIfDeath')} /></label>
+        </div></div>
         <div className="form-section"><h2>Santé et disponibilité</h2><div className="form-grid">
           <label>Quelle est votre taille ?<input value={form.height} onChange={set('height')} /></label>
           <label>Quel est votre poids ?<input value={form.weight} onChange={set('weight')} /></label>
           <label className="span-2">Disponibilités pour une rencontre<textarea value={form.availability} onChange={set('availability')} placeholder="Jour, heure et préférence: bureau, domicile ou visioconférence" /></label>
-          <label className="span-2">Quels sont vos projets les plus prioritaires actuellement et comment pourrais-je vous être utile ?<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
+          <label className="span-2">Autres informations utiles pour votre conseiller<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
         </div></div>
         <button className="submit-button" disabled={!completed || loading} onClick={saveProspect}>{loading ? <Loader2 className="spin"/> : null} Envoyer mes informations</button>
         <p className="required-note">Champs minimum requis : nom, prénoms, date de naissance, téléphone et courriel.</p>
@@ -816,17 +859,26 @@ function EditableProspectForm({ form, setForm, loading, onSave, onCancel }: { fo
       <label>Nom de famille<input value={form.legalLastName} onChange={set('legalLastName')} /></label>
       <label>Prénoms<input value={form.firstNames} onChange={set('firstNames')} /></label>
       <label>Date de naissance<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
-      <label>Lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+      <label>Sexe<select value={form.sex} onChange={set('sex')}><option value="">Sélectionner</option><option value="Homme">Homme</option><option value="Femme">Femme</option><option value="Non précisé">Non précisé</option></select></label>
+      <label>Pays / lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+      <label>Statut de résident<input value={form.residencyStatus} onChange={set('residencyStatus')} /></label>
       <label>Situation familiale<select value={form.maritalStatus} onChange={set('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
       <label>Enfants à charge<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
       <label>Date d'arrivée au Canada<input type="date" value={form.arrivalInCanada} onChange={set('arrivalInCanada')} /></label>
+      <label>Le client est-il le propriétaire ?<select value={form.insuredIsOwner} onChange={set('insuredIsOwner')}><option value="oui">Oui (assuré = propriétaire)</option><option value="non">Non (souscrit pour un tiers)</option></select></label>
+      {form.insuredIsOwner === 'non' && <label>Nom du propriétaire<input value={form.ownerName} onChange={set('ownerName')} /></label>}
+      {form.insuredIsOwner === 'non' && <label>Lien propriétaire / assuré<input value={form.ownerRelationship} onChange={set('ownerRelationship')} /></label>}
       <label>Téléphone<input value={form.phone} onChange={set('phone')} /></label>
       <label>Courriel<input value={form.email} onChange={set('email')} /></label>
       <label className="span-2">Adresse de domicile<input value={form.address} onChange={set('address')} placeholder="Rue, ville, province" /></label>
       <label>Code postal<input value={form.postalCode} onChange={set('postalCode')} /></label>
       <label className="span-2">Emploi actuel, titre et poste<input value={form.occupation} onChange={set('occupation')} /></label>
+      <label>Nom de l'employeur<input value={form.employerName} onChange={set('employerName')} /></label>
       <label className="span-2">Adresse emploi<input value={form.employerAddress} onChange={set('employerAddress')} /></label>
-      <label>Revenu annuel<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>
+      <label>Type de revenu<select value={form.incomeType} onChange={set('incomeType')}><option value="annuel">Annuel</option><option value="horaire">Horaire</option></select></label>
+      {form.incomeType === 'horaire'
+        ? <label>Taux horaire net<input value={form.hourlyRate} onChange={set('hourlyRate')} inputMode="decimal" /></label>
+        : <label>Revenu annuel<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>}
       <label>Total des biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" /></label>
       <label>Total des dettes<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" /></label>
       <label>Assurance vie existante<select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
@@ -836,7 +888,12 @@ function EditableProspectForm({ form, setForm, loading, onSave, onCancel }: { fo
       <label>Taille<input value={form.height} onChange={set('height')} /></label>
       <label>Poids<input value={form.weight} onChange={set('weight')} /></label>
       <label className="span-2">Disponibilités<textarea value={form.availability} onChange={set('availability')} /></label>
-      <label className="span-2">Projets prioritaires<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
+      <label className="span-2">Objectifs court terme<textarea value={form.shortTermGoals} onChange={set('shortTermGoals')} /></label>
+      <label className="span-2">Objectifs moyen terme<textarea value={form.mediumTermGoals} onChange={set('mediumTermGoals')} /></label>
+      <label className="span-2">Objectifs long terme<textarea value={form.longTermGoals} onChange={set('longTermGoals')} /></label>
+      <label className="span-2">Situation financière actuelle<textarea value={form.currentFinancialSituation} onChange={set('currentFinancialSituation')} /></label>
+      <label className="span-2">Besoin de la famille en cas de décès<textarea value={form.familyNeedIfDeath} onChange={set('familyNeedIfDeath')} /></label>
+      <label className="span-2">Autres informations<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
     </div>
   </section>;
 }
