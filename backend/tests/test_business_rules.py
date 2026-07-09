@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+
+import pytest
 
 from app.abf_mapping import build_abf_values
 from app.calculations import (
@@ -71,7 +74,7 @@ def test_owner_section_blank_when_insured_is_owner() -> None:
     prospect.owner = OwnerInfo(insured_is_owner=True)
     values = build_abf_values(prospect, AdvisorReview())
     assert values["Owner Name"] == ""
-    assert values["Owner Relationship"] == ""
+    assert values["Relationship to Insured"] == ""
 
 
 def test_owner_section_filled_for_third_party() -> None:
@@ -79,10 +82,10 @@ def test_owner_section_filled_for_third_party() -> None:
     prospect.owner = OwnerInfo(insured_is_owner=False, name="Jean Payeur", relationship="Ami")
     values = build_abf_values(prospect, AdvisorReview())
     assert values["Owner Name"] == "Jean Payeur"
-    assert values["Owner Relationship"] == "Ami"
+    assert values["Relationship to Insured"] == "Ami"
 
 
-def test_goals_are_mapped_by_horizon() -> None:
+def test_goals_are_mapped_to_real_kyc_fields() -> None:
     prospect = _prospect()
     prospect.goals = GoalsInfo(
         short_term_goals="Régulariser mes documents",
@@ -90,9 +93,12 @@ def test_goals_are_mapped_by_horizon() -> None:
         long_term_goals="Bâtir ma liberté financière",
     )
     values = build_abf_values(prospect, AdvisorReview())
-    assert values["ShortTermGoals"] == "Régulariser mes documents"
-    assert values["MediumTermGoals"] == "Acheter une voiture"
-    assert values["LongTermGoals"] == "Bâtir ma liberté financière"
+    # Question 1 (court terme) -> Text Field1/2; Question 2 (long) -> 3/4.
+    assert values["Text Field1"] == "Régulariser mes documents"
+    assert values["Text Field3"] == "Bâtir ma liberté financière"
+    # Medium term has no dedicated slot, so it is preserved in 'autres' (9/10).
+    assert "moyen terme" in values["Text Field9"].lower()
+    assert "Acheter une voiture" in values["Text Field9"]
 
 
 def test_agent_notes_are_substantial_and_personalized() -> None:
@@ -120,3 +126,46 @@ def test_recommendations_follow_example_structure() -> None:
     assert "600 000" in rec1  # 50/50 split
     assert "croissante" in rec2.lower()
     assert "300 $" in pref  # preference budget surfaced
+
+
+TEMPLATE = Path(__file__).resolve().parents[2] / "samples/private/ABF_VIERGE.pdf"
+
+
+@pytest.mark.skipif(not TEMPLATE.exists(), reason="private ABF_VIERGE.pdf not available")
+def test_fills_real_template_pages(tmp_path) -> None:
+    """Every mapped key must hit a real field and render on the actual form."""
+    import fitz
+
+    from app.pdf_fill import fill_acroform
+
+    prospect = _prospect()
+    prospect.employment = EmploymentInfo(occupation="Serveur", employer_name="Bar Burrito", annual_income=60000)
+    prospect.financial.total_assets = 10000
+    prospect.goals = GoalsInfo(
+        short_term_goals="Régulariser mes documents",
+        long_term_goals="Bâtir sa liberté financière",
+        current_financial_situation="Acceptable",
+        family_need_if_death="Ma famille",
+        acceptable_monthly_budget=500,
+    )
+    review = AdvisorReview(replacement_years=20, final_recommended_coverage=1000000, client_preference_budget=300)
+    values = build_abf_values(prospect, review)
+
+    output = tmp_path / "generated.pdf"
+    report = fill_acroform(TEMPLATE, output, values)
+    assert report["pages_after"] == 16
+    assert report["missing_fields"] == []  # no stray/guessed field names
+    assert report["filled_widget_updates"] >= 150
+
+    doc = fitz.open(output)
+    try:
+        kyc = doc[4].get_text()
+        assert "Homme" in kyc and "Demandeur" in kyc and "Bar Burrito" in kyc
+        assert "Régulariser mes documents" in kyc
+        product = doc[7].get_text()
+        assert "Vie Universelle" in product
+        assert "600,000" in product and "1,200,000" in product  # rec 1/2 full need
+        assert "500,000" in product and "1,000,000" in product  # preference reduced
+        assert "24 ans" in doc[9].get_text()  # agent notes narrative
+    finally:
+        doc.close()
