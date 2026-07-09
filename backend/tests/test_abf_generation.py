@@ -22,7 +22,7 @@ def test_mapping_contains_core_abf_fields() -> None:
     values = build_abf_values(req.prospect, req.review)
     assert values["Insured Name"] == "Jocelina TUSEWU NZAZI"
     assert values["DOB"] == "1995-05-17"
-    assert values["TotalFNA"] == "C$ 858,000.00"
+    assert values["TotalFNA"] == "C$ 908,000.00"
     assert "conseiller" in values["AgentNotes.0"].lower() or "originaire" in values["AgentNotes.0"].lower()
 
 

@@ -31,6 +31,7 @@ from .storage import (
     create_user_by_owner,
     default_review,
     delete_user_by_owner,
+    get_pdf_field_overrides,
     get_user_by_id,
     get_prospect,
     get_session_user,
@@ -40,6 +41,7 @@ from .storage import (
     list_organizations,
     list_prospects,
     list_users,
+    merge_pdf_field_overrides,
     prospect_review,
     prospect_submission,
     register_account,
@@ -80,6 +82,10 @@ class PdfEditRequest(BaseModel):
 
 class PdfFieldEditRequest(BaseModel):
     path: str
+    fields: dict[str, str] = Field(default_factory=dict)
+
+
+class PdfOverridesRequest(BaseModel):
     fields: dict[str, str] = Field(default_factory=dict)
 
 
@@ -477,7 +483,8 @@ def generate_prospect_abf(
     organization = get_organization(target_organization_id)
     if review is None or review == AdvisorReview():
         review = prospect_review(prospect_id, organization_id=organization_id, organization=organization)
-    result = _generate_abf(AbfGenerationRequest(prospect=prospect, review=review))
+    overrides = get_pdf_field_overrides(prospect_id, organization_id=organization_id)
+    result = _generate_abf(AbfGenerationRequest(prospect=prospect, review=review), overrides=overrides)
     save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
     return result
 
@@ -574,6 +581,26 @@ def apply_pdf_edits(prospect_id: str, request: PdfEditRequest, user: dict = Depe
     return result
 
 
+@app.patch("/api/prospects/{prospect_id}/pdf-overrides")
+def save_prospect_pdf_overrides(
+    prospect_id: str, request: PdfOverridesRequest, user: dict = Depends(current_paid_user)
+) -> dict:
+    """Store the counselor's direct PDF field edits without producing a new PDF.
+
+    Saving only records the overrides; the final document is created solely when
+    the counselor clicks "Générer le PDF", so the workspace is not flooded with
+    intermediate PDF versions.
+    """
+    organization_id = None if user["role"] == "owner" else user["organization_id"]
+    if not request.fields:
+        raise HTTPException(status_code=400, detail="Aucune modification PDF à enregistrer")
+    try:
+        overrides = merge_pdf_field_overrides(prospect_id, request.fields, organization_id=organization_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Prospect introuvable") from None
+    return {"pdf_field_overrides": overrides}
+
+
 @app.patch("/api/prospects/{prospect_id}/pdf-fields", response_model=AbfGenerationResult)
 def update_prospect_pdf_fields(
     prospect_id: str, request: PdfFieldEditRequest, user: dict = Depends(current_paid_user)
@@ -593,6 +620,10 @@ def update_prospect_pdf_fields(
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="PDF introuvable") from None
 
+    # Remember the manual edits so a later "Générer le PDF final" keeps them
+    # instead of reverting to the values derived from the client form.
+    merge_pdf_field_overrides(prospect_id, request.fields, organization_id=organization_id)
+
     target_organization_id = prospect_record.get("organization_id") or user["organization_id"]
     result = AbfGenerationResult(output_path=str(output), **report)
     save_abf_document(prospect_id, result.output_path, result.model_dump(), organization_id=target_organization_id)
@@ -609,8 +640,12 @@ def generate_abf(request: AbfGenerationRequest) -> AbfGenerationResult:
     return _generate_abf(request)
 
 
-def _generate_abf(request: AbfGenerationRequest) -> AbfGenerationResult:
+def _generate_abf(request: AbfGenerationRequest, overrides: dict | None = None) -> AbfGenerationResult:
     values = build_abf_values(request.prospect, request.review)
+    if overrides:
+        # The counselor's direct PDF field edits win over the form-derived
+        # values so regenerating the ABF keeps every manual correction.
+        values.update({name: str(value) for name, value in overrides.items()})
     safe_name = "_".join(request.prospect.identity.full_name.split()) or "client"
     output = OUTPUT_DIR / f"ABF_{safe_name}_{uuid4().hex[:8]}.pdf"
     report = fill_acroform(TEMPLATE, output, values)

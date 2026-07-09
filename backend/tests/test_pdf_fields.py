@@ -61,9 +61,16 @@ def test_update_acroform_fields_persists_and_stays_editable(tmp_path: Path) -> N
 
     doc = fitz.open(output)
     try:
+        text = doc[0].get_text()
+        # The edited field shows a single clean value: the previous text must not
+        # remain underneath, and the new value must appear exactly once.
+        assert "Alice EDITED" in text
+        assert text.count("Alice EDITED") == 1
+        assert "Alice" not in text.replace("Alice EDITED", "")  # no leftover old value
+        # NeedAppearances is intentionally NOT set so readers keep the baked,
+        # single-value appearance instead of re-rendering over it.
         catalog = doc.pdf_catalog()
-        acroform = doc.xref_get_key(catalog, "AcroForm/NeedAppearances")
-        assert acroform[1] == "true"
+        assert doc.xref_get_key(catalog, "AcroForm/NeedAppearances")[0] == "null"
         for widget in doc[0].widgets() or []:
             assert not (int(widget.field_flags or 0) & 1)  # read-only bit cleared
     finally:
@@ -129,5 +136,61 @@ def test_edit_filled_pdf_fields_end_to_end(tmp_path: Path, monkeypatch: pytest.M
     )
     assert empty.status_code == 400
 
-    Path(source_path).unlink(missing_ok=True)
-    Path(output_path).unlink(missing_ok=True)
+    # Regenerating the final PDF must keep the direct field edit instead of
+    # reverting to the form-derived value.
+    regenerated = client.post(f"/api/prospects/{prospect_id}/generate-abf", headers=headers, json={})
+    assert regenerated.status_code == 200
+    regenerated_path = regenerated.json()["output_path"]
+    regen_fields = {field["name"]: field["value"] for field in list_acroform_fields(Path(regenerated_path))}
+    assert regen_fields["Advisor Name"] == "Conseiller Corrigé"
+
+    for path in (source_path, output_path, regenerated_path):
+        Path(path).unlink(missing_ok=True)
+
+
+def test_pdf_overrides_saved_without_new_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Saving overrides stores the edits but does not create a PDF/document;
+    only generation produces a document, and it applies the saved overrides."""
+    template = tmp_path / "template.pdf"
+    _build_form(template)
+    monkeypatch.setattr(main, "TEMPLATE", template)
+
+    client = TestClient(app)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "KOFFI.AKPOBI@MYGREATWAY.CA", "password": "Finab-ABF-2026!"},
+    )
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    payload = {
+        "identity": {"legal_last_name": "OVERRIDE", "first_names": "Jean", "date_of_birth": "1990-01-01", "marital_status": "célibataire"},
+        "contact": {"phone": "5140000000", "email": "jean-override@example.com"},
+        "meeting": {"consent_acknowledged": True},
+    }
+    prospect_id = client.post("/api/prospects", json=payload).json()["id"]
+    first = client.post(f"/api/prospects/{prospect_id}/generate-abf", headers=headers, json={})
+    first_paths = {first.json()["output_path"]}
+    assert len(client.get(f"/api/prospects/{prospect_id}", headers=headers).json()["documents"]) == 1
+
+    # Saving overrides must not add a document.
+    saved = client.patch(
+        f"/api/prospects/{prospect_id}/pdf-overrides",
+        headers=headers,
+        json={"fields": {"Advisor Name": "Nom Corrigé"}},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["pdf_field_overrides"]["Advisor Name"] == "Nom Corrigé"
+    detail = client.get(f"/api/prospects/{prospect_id}", headers=headers).json()
+    assert len(detail["documents"]) == 1  # still one, no PDF spam
+    assert detail["pdf_field_overrides"]["Advisor Name"] == "Nom Corrigé"
+
+    # Generating now adds one document that honors the saved override.
+    second = client.post(f"/api/prospects/{prospect_id}/generate-abf", headers=headers, json={})
+    assert len(client.get(f"/api/prospects/{prospect_id}", headers=headers).json()["documents"]) == 2
+    generated = {field["name"]: field["value"] for field in list_acroform_fields(Path(second.json()["output_path"]))}
+    assert generated["Advisor Name"] == "Nom Corrigé"
+
+    # Empty override payload is rejected.
+    assert client.patch(f"/api/prospects/{prospect_id}/pdf-overrides", headers=headers, json={"fields": {}}).status_code == 400
+
+    for path in first_paths | {second.json()["output_path"]}:
+        Path(path).unlink(missing_ok=True)

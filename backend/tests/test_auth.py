@@ -355,8 +355,9 @@ def test_owner_can_save_advisor_review_used_for_pdf_generation(monkeypatch) -> N
 
     captured = {}
 
-    def fake_generate(request):
+    def fake_generate(request, overrides=None):
         captured["review"] = request.review
+        captured["overrides"] = overrides
         return main.AbfGenerationResult(
             output_path="/tmp/ABF_test.pdf",
             pages_before=1,

@@ -131,6 +131,7 @@ def connect() -> sqlite3.Connection:
     )
     _ensure_column(conn, "prospects", "organization_id", "TEXT")
     _ensure_column(conn, "prospects", "advisor_review_json", "TEXT")
+    _ensure_column(conn, "prospects", "pdf_field_overrides_json", "TEXT")
     _ensure_column(conn, "abf_documents", "organization_id", "TEXT")
     _ensure_column(conn, "users", "is_active", "INTEGER NOT NULL DEFAULT 1")
     _ensure_column(conn, "users", "plan", "TEXT NOT NULL DEFAULT 'finab_pro'")
@@ -795,6 +796,41 @@ def update_prospect_review(
     return get_prospect(prospect_id, organization_id=organization_id)
 
 
+def get_pdf_field_overrides(prospect_id: str, organization_id: str | None = None) -> dict:
+    """Return the counselor's direct PDF field edits saved for this prospect."""
+    record = get_prospect(prospect_id, organization_id=organization_id)
+    return record.get("pdf_field_overrides") or {}
+
+
+def merge_pdf_field_overrides(
+    prospect_id: str,
+    fields: dict,
+    organization_id: str | None = None,
+) -> dict:
+    """Persist the counselor's direct PDF field edits so a later regeneration
+    of the ABF keeps them instead of reverting to the form-derived values."""
+    conn = connect()
+    if organization_id:
+        row = conn.execute(
+            "SELECT pdf_field_overrides_json FROM prospects WHERE id=? AND organization_id=?",
+            (prospect_id, organization_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT pdf_field_overrides_json FROM prospects WHERE id=?", (prospect_id,)
+        ).fetchone()
+    if not row:
+        raise KeyError(prospect_id)
+    current = json.loads(row["pdf_field_overrides_json"]) if row["pdf_field_overrides_json"] else {}
+    current.update({str(name): str(value) for name, value in fields.items()})
+    conn.execute(
+        "UPDATE prospects SET pdf_field_overrides_json=?, updated_at=? WHERE id=?",
+        (json.dumps(current, ensure_ascii=False), now_iso(), prospect_id),
+    )
+    conn.commit()
+    return current
+
+
 def update_status(prospect_id: str, status: str) -> None:
     conn = connect()
     conn.execute(
@@ -852,13 +888,15 @@ def list_documents(prospect_id: str, organization_id: str | None = None) -> list
 
 
 def default_review(prospect: ProspectSubmission, organization: dict | None = None) -> AdvisorReview:
+    from .calculations import age_on, suggested_replacement_years
+
     organization = organization or DEFAULT_ORG
     return AdvisorReview(
         reviewed_by_advisor=True,
         advisor_name=organization.get("advisor_name") or DEFAULT_ORG["advisor_name"],
         advisor_phone=organization.get("advisor_phone") or DEFAULT_ORG["advisor_phone"],
         advisor_email=organization.get("advisor_email") or DEFAULT_ORG["advisor_email"],
-        replacement_years=10,
+        replacement_years=suggested_replacement_years(age_on(prospect.identity.date_of_birth)),
         final_recommended_coverage=0,
         recommendation_1_budget=prospect.goals.acceptable_monthly_budget,
         recommendation_2_budget=prospect.goals.acceptable_monthly_budget * 1.5,
@@ -919,6 +957,8 @@ def _row_to_prospect(row: sqlite3.Row, include_payload: bool) -> dict:
     if include_payload:
         data["payload"] = json.loads(row["payload_json"])
         data["advisor_review"] = json.loads(row["advisor_review_json"]) if row["advisor_review_json"] else None
+        overrides = row["pdf_field_overrides_json"] if "pdf_field_overrides_json" in row.keys() else None
+        data["pdf_field_overrides"] = json.loads(overrides) if overrides else {}
     return data
 
 

@@ -7,17 +7,25 @@ type FormState = {
   legalLastName: string;
   firstNames: string;
   dateOfBirth: string;
+  sex: string;
   placeOfBirth: string;
+  residencyStatus: string;
   maritalStatus: string;
   dependents: string;
   arrivalInCanada: string;
+  insuredIsOwner: string;
+  ownerName: string;
+  ownerRelationship: string;
   phone: string;
   email: string;
   address: string;
   postalCode: string;
   occupation: string;
+  employerName: string;
   employerAddress: string;
+  incomeType: string;
   annualIncome: string;
+  hourlyRate: string;
   totalAssets: string;
   totalDebts: string;
   hasExistingInsurance: string;
@@ -27,6 +35,11 @@ type FormState = {
   height: string;
   weight: string;
   availability: string;
+  shortTermGoals: string;
+  mediumTermGoals: string;
+  longTermGoals: string;
+  currentFinancialSituation: string;
+  familyNeedIfDeath: string;
   priorityProjects: string;
 };
 
@@ -53,7 +66,7 @@ type ReviewState = {
   preference_notes: string;
   agent_notes: string;
 };
-type ProspectDetail = ProspectSummary & { payload: any; advisor_review?: any; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
+type ProspectDetail = ProspectSummary & { payload: any; advisor_review?: any; pdf_field_overrides?: Record<string, string>; documents?: Array<{ id?: string; output_path?: string; created_at?: string; report?: any }> };
 type PdfField = { name: string; value: string; type: string; page: number; rect: [number, number, number, number]; multiline: boolean; max_length: number; options: string[] };
 type AdminOverview = { organizations: number; users: number; active_users: number; admins?: number; unlimited_users?: number; prospects: number; documents: number; recent_prospects: ProspectSummary[]; plan_distribution?: Array<{ plan: string; subscription_status: string; c: number }> };
 type AdminUser = User & { organization: Organization };
@@ -61,7 +74,7 @@ type AdminUser = User & { organization: Organization };
 const AUTH_KEY = 'finab_abf_session';
 
 const emptyForm: FormState = {
-  legalLastName: '', firstNames: '', dateOfBirth: '', placeOfBirth: '', maritalStatus: '', dependents: '', arrivalInCanada: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerAddress: '', annualIncome: '', totalAssets: '', totalDebts: '', hasExistingInsurance: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', priorityProjects: '',
+  legalLastName: '', firstNames: '', dateOfBirth: '', sex: '', placeOfBirth: '', residencyStatus: '', maritalStatus: '', dependents: '', arrivalInCanada: '', insuredIsOwner: 'oui', ownerName: '', ownerRelationship: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerName: '', employerAddress: '', incomeType: 'annuel', annualIncome: '', hourlyRate: '', totalAssets: '', totalDebts: '', hasExistingInsurance: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', shortTermGoals: '', mediumTermGoals: '', longTermGoals: '', currentFinancialSituation: '', familyNeedIfDeath: '', priorityProjects: '',
 };
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const emptyReview: ReviewState = {
@@ -107,12 +120,13 @@ function payloadFromForm(form: FormState) {
   const parsedAddress = parseAddress(form.address);
   const hasInsurance = form.hasExistingInsurance === 'oui';
   return {
-    identity: { legal_last_name: form.legalLastName, first_names: form.firstNames, date_of_birth: form.dateOfBirth, sex: 'Non précisé', place_of_birth: form.placeOfBirth, arrival_in_canada: form.arrivalInCanada || null, residency_status: '', marital_status: form.maritalStatus || 'autre', dependents_count: numberValue(form.dependents) },
+    identity: { legal_last_name: form.legalLastName, first_names: form.firstNames, date_of_birth: form.dateOfBirth, sex: form.sex || 'Non précisé', place_of_birth: form.placeOfBirth, arrival_in_canada: form.arrivalInCanada || null, residency_status: form.residencyStatus, marital_status: form.maritalStatus || 'autre', dependents_count: numberValue(form.dependents) },
     contact: { phone: form.phone, email: form.email, address: parsedAddress.address, city: parsedAddress.city, province: parsedAddress.province, postal_code: form.postalCode },
-    employment: { occupation: form.occupation, employer_name: '', employer_address: form.employerAddress, annual_income: numberValue(form.annualIncome), monthly_net_income: 0 },
+    owner: { insured_is_owner: form.insuredIsOwner !== 'non', name: form.ownerName, relationship: form.ownerRelationship, email: '', phone: '' },
+    employment: { occupation: form.occupation, employer_name: form.employerName, employer_address: form.employerAddress, income_type: form.incomeType === 'horaire' ? 'horaire' : 'annuel', annual_income: numberValue(form.annualIncome), hourly_rate: numberValue(form.hourlyRate), monthly_net_income: 0 },
     financial: { total_assets: numberValue(form.totalAssets), cash_savings: 0, personal_property: numberValue(form.totalAssets), total_debts: numberValue(form.totalDebts), credit_cards: 0, car_loan: 0, student_loan: 0, personal_loan: 0, mortgage: 0, monthly_expenses: 0, monthly_debt_repayment: 0, monthly_savings: 0 },
     insurance: { has_existing_life_insurance: hasInsurance, existing_life_coverage: 0, existing_monthly_premium: 0, existing_retirement_savings_note: form.existingInsuranceDetails, no_insurance_reason: form.noInsuranceReason },
-    goals: { short_term_goals: form.priorityProjects, long_term_goals: form.priorityProjects, family_need_if_death: form.priorityProjects, priority_projects: form.priorityProjects, acceptable_monthly_budget: numberValue(form.acceptableBudget), client_preference: form.acceptableBudget },
+    goals: { short_term_goals: form.shortTermGoals, medium_term_goals: form.mediumTermGoals, long_term_goals: form.longTermGoals, current_financial_situation: form.currentFinancialSituation, family_need_if_death: form.familyNeedIfDeath, additional_info: form.priorityProjects, priority_projects: form.priorityProjects, acceptable_monthly_budget: numberValue(form.acceptableBudget), client_preference: form.acceptableBudget },
     health: { height: form.height, weight: form.weight, smoker: null, health_notes: '' },
     meeting: { availability: form.availability, preferred_mode: '', consent_acknowledged: true },
   };
@@ -126,17 +140,25 @@ function formFromPayload(payload: any): FormState {
     legalLastName: payload?.identity?.legal_last_name || '',
     firstNames: payload?.identity?.first_names || '',
     dateOfBirth: payload?.identity?.date_of_birth || '',
+    sex: payload?.identity?.sex && payload.identity.sex !== 'Non précisé' ? payload.identity.sex : '',
     placeOfBirth: payload?.identity?.place_of_birth || '',
+    residencyStatus: payload?.identity?.residency_status || '',
     maritalStatus: payload?.identity?.marital_status || '',
     dependents: String(payload?.identity?.dependents_count ?? ''),
     arrivalInCanada: payload?.identity?.arrival_in_canada || '',
+    insuredIsOwner: payload?.owner?.insured_is_owner === false ? 'non' : 'oui',
+    ownerName: payload?.owner?.name || '',
+    ownerRelationship: payload?.owner?.relationship || '',
     phone: contact.phone || '',
     email: contact.email || '',
     address,
     postalCode: contact.postal_code || '',
     occupation: payload?.employment?.occupation || '',
+    employerName: payload?.employment?.employer_name || '',
     employerAddress: payload?.employment?.employer_address || '',
+    incomeType: payload?.employment?.income_type === 'horaire' ? 'horaire' : 'annuel',
     annualIncome: String(payload?.employment?.annual_income || ''),
+    hourlyRate: String(payload?.employment?.hourly_rate || ''),
     totalAssets: String(payload?.financial?.total_assets || ''),
     totalDebts: String(payload?.financial?.total_debts || ''),
     hasExistingInsurance: payload?.insurance?.has_existing_life_insurance ? 'oui' : 'non',
@@ -146,7 +168,12 @@ function formFromPayload(payload: any): FormState {
     height: payload?.health?.height || '',
     weight: payload?.health?.weight || '',
     availability: payload?.meeting?.availability || '',
-    priorityProjects: payload?.goals?.priority_projects || '',
+    shortTermGoals: payload?.goals?.short_term_goals || '',
+    mediumTermGoals: payload?.goals?.medium_term_goals || '',
+    longTermGoals: payload?.goals?.long_term_goals || '',
+    currentFinancialSituation: payload?.goals?.current_financial_situation || '',
+    familyNeedIfDeath: payload?.goals?.family_need_if_death || '',
+    priorityProjects: payload?.goals?.priority_projects || payload?.goals?.additional_info || '',
   };
 }
 
@@ -230,10 +257,15 @@ function PublicForm() {
           <label>Nom de famille<input value={form.legalLastName} onChange={set('legalLastName')} autoComplete="family-name" /></label>
           <label>Prénoms<input value={form.firstNames} onChange={set('firstNames')} autoComplete="given-name" /></label>
           <label>Date de naissance<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
-          <label>Lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+          <label>Sexe<select value={form.sex} onChange={set('sex')}><option value="">Sélectionner</option><option value="Homme">Homme</option><option value="Femme">Femme</option><option value="Non précisé">Préfère ne pas préciser</option></select></label>
+          <label>Pays / lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+          <label>Statut de résident<input value={form.residencyStatus} onChange={set('residencyStatus')} placeholder="Citoyen, résident permanent, demandeur d'asile…" /></label>
           <label>Situation familiale<select value={form.maritalStatus} onChange={set('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
           <label>Nombre d’enfants à charge<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
           <label>Date d'arrivée au Canada<input type="date" value={form.arrivalInCanada} onChange={set('arrivalInCanada')} /></label>
+          <label className="span-2">Souscrivez-vous cette assurance pour vous-même ?<select value={form.insuredIsOwner} onChange={set('insuredIsOwner')}><option value="oui">Oui, je suis l'assuré et le propriétaire</option><option value="non">Non, je souscris pour une autre personne</option></select></label>
+          {form.insuredIsOwner === 'non' && <label>Votre nom (propriétaire payeur)<input value={form.ownerName} onChange={set('ownerName')} placeholder="Nom de la personne qui paie" /></label>}
+          {form.insuredIsOwner === 'non' && <label>Votre lien avec l'assuré<input value={form.ownerRelationship} onChange={set('ownerRelationship')} placeholder="Ex: conjoint, parent, ami…" /></label>}
         </div></div>
         <div className="form-section"><h2>Coordonnées</h2><div className="form-grid">
           <label>Téléphone<input value={form.phone} onChange={set('phone')} autoComplete="tel" /></label>
@@ -243,8 +275,12 @@ function PublicForm() {
         </div></div>
         <div className="form-section"><h2>Emploi et revenu</h2><div className="form-grid">
           <label className="span-2">Emploi actuel, titre et poste<input value={form.occupation} onChange={set('occupation')} placeholder="Ex: Préposé aux bénéficiaires, infirmier, entrepreneur…" /></label>
+          <label className="span-2">Nom de l'employeur<input value={form.employerName} onChange={set('employerName')} placeholder="Ex: Bar Burrito, CHSLD Montréal…" /></label>
           <label className="span-2">Adresse de votre emploi actuel<input value={form.employerAddress} onChange={set('employerAddress')} placeholder="Rue, ville et code postal" /></label>
-          <label className="span-2">Revenu annuel estimé<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" placeholder="Ex: 40 000 $" /></label>
+          <label>Votre revenu est<select value={form.incomeType} onChange={set('incomeType')}><option value="annuel">Annuel</option><option value="horaire">Horaire (taux de l'heure)</option></select></label>
+          {form.incomeType === 'horaire'
+            ? <label>Taux horaire net<input value={form.hourlyRate} onChange={set('hourlyRate')} inputMode="decimal" placeholder="Ex: 25 $ / h — calculé sur 40 h × 52 sem." /></label>
+            : <label>Revenu annuel net estimé<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" placeholder="Ex: 40 000 $" /></label>}
         </div></div>
         <div className="form-section"><h2>Situation financière</h2><div className="form-grid">
           <label className="span-2">Valeur totale approximative de vos biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" placeholder="Auto, épargne, biens personnels…" /></label>
@@ -256,11 +292,18 @@ function PublicForm() {
           <label className="span-2">Si vous n’avez pas d’assurance, quelle en est la raison ?<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
           <label className="span-2">Budget mensuel confortable pour vos protections et votre épargne<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" placeholder="Ex: 150 $ / mois" /></label>
         </div></div>
+        <div className="form-section"><h2>Objectifs financiers</h2><div className="form-grid">
+          <label className="span-2">Objectifs à court terme<textarea value={form.shortTermGoals} onChange={set('shortTermGoals')} placeholder="Ex: régulariser mes documents, fonder ma famille…" /></label>
+          <label className="span-2">Objectifs à moyen terme<textarea value={form.mediumTermGoals} onChange={set('mediumTermGoals')} placeholder="Ex: acheter une voiture, épargner pour un projet…" /></label>
+          <label className="span-2">Objectifs à long terme<textarea value={form.longTermGoals} onChange={set('longTermGoals')} placeholder="Ex: immobilier, entrepreneuriat, liberté financière…" /></label>
+          <label className="span-2">Comment décririez-vous votre situation financière actuelle ?<textarea value={form.currentFinancialSituation} onChange={set('currentFinancialSituation')} placeholder="Ex: acceptable, en construction, stable…" /></label>
+          <label className="span-2">En cas de décès prématuré, quel serait le besoin immédiat de votre famille ?<textarea value={form.familyNeedIfDeath} onChange={set('familyNeedIfDeath')} /></label>
+        </div></div>
         <div className="form-section"><h2>Santé et disponibilité</h2><div className="form-grid">
           <label>Quelle est votre taille ?<input value={form.height} onChange={set('height')} /></label>
           <label>Quel est votre poids ?<input value={form.weight} onChange={set('weight')} /></label>
           <label className="span-2">Disponibilités pour une rencontre<textarea value={form.availability} onChange={set('availability')} placeholder="Jour, heure et préférence: bureau, domicile ou visioconférence" /></label>
-          <label className="span-2">Quels sont vos projets les plus prioritaires actuellement et comment pourrais-je vous être utile ?<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
+          <label className="span-2">Autres informations utiles pour votre conseiller<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
         </div></div>
         <button className="submit-button" disabled={!completed || loading} onClick={saveProspect}>{loading ? <Loader2 className="spin"/> : null} Envoyer mes informations</button>
         <p className="required-note">Champs minimum requis : nom, prénoms, date de naissance, téléphone et courriel.</p>
@@ -400,7 +443,30 @@ function AdvisorDashboard() {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<FormState>(emptyForm);
   const [reviewForm, setReviewForm] = useState<ReviewState>(emptyReview);
+  const [pdfValues, setPdfValues] = useState<Record<string, string>>({});
+  const [pdfOriginals, setPdfOriginals] = useState<Record<string, string>>({});
   const token = session?.token;
+
+  // The PDF field edits live here (lifted out of the editor) so every save/
+  // generate action can flush them, no matter which button the advisor clicks.
+  function handlePdfFieldsLoaded(list: PdfField[]) {
+    const base = Object.fromEntries(list.map((field) => [field.name, field.value || '']));
+    // Reflect any saved-but-not-yet-generated edits so they survive a reload.
+    const merged = { ...base, ...(selected?.pdf_field_overrides || {}) };
+    setPdfValues(merged);
+    setPdfOriginals(merged);
+  }
+  function setPdfFieldValue(name: string, value: string) {
+    setPdfValues((current) => ({ ...current, [name]: value }));
+  }
+  function resetPdfFields() { setPdfValues(pdfOriginals); }
+  function pdfFieldDiff(): Record<string, string> {
+    const diff: Record<string, string> = {};
+    for (const name of Object.keys(pdfValues)) {
+      if ((pdfValues[name] ?? '') !== (pdfOriginals[name] ?? '')) diff[name] = pdfValues[name] ?? '';
+    }
+    return diff;
+  }
 
   async function refresh(selectId?: string) {
     if (!token) return;
@@ -423,46 +489,43 @@ function AdvisorDashboard() {
     catch { setMessage('Impossible de charger ce prospect.'); }
     finally { setLoading(false); }
   }
+  // Persist the advisor's direct PDF field edits as overrides only. This does
+  // NOT create a PDF or a document — the final PDF is produced only when the
+  // advisor clicks "Générer le PDF", so the workspace stays clean.
+  async function persistPdfOverrides(): Promise<Record<string, string> | null> {
+    if (!selected || !token) return null;
+    const diff = pdfFieldDiff();
+    if (Object.keys(diff).length === 0) return null;
+    await api(`/api/prospects/${selected.id}/pdf-overrides`, { method: 'PATCH', body: JSON.stringify({ fields: diff }) }, token);
+    setSelected((current) => current ? { ...current, pdf_field_overrides: { ...(current.pdf_field_overrides || {}), ...diff } } : current);
+    return diff;
+  }
+
+  async function savePdfFields() {
+    if (!selected || !token) return;
+    setLoading(true); setMessage('');
+    try {
+      const saved = await persistPdfOverrides();
+      if (!saved) { setMessage('Aucune modification à enregistrer.'); setLoading(false); return; }
+      setPdfOriginals(pdfValues); // clear the "modified" markers without reloading a PDF
+      setMessage('Modifications enregistrées. Cliquez sur « Générer le PDF » pour produire le document final.');
+    } catch { setMessage('Enregistrement impossible. Réessayez.'); }
+    finally { setLoading(false); }
+  }
+
   async function generateAbf() {
     if (!selected || !token) return;
-    setLoading(true); setMessage(''); setPdfPath('');
+    setLoading(true); setMessage('');
     try {
+      await persistPdfOverrides();
+      setPdfPath('');
       await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
       await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/generate-abf`, { method: 'POST', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
       await refresh(selected.id);
       setPdfPath(result.output_path);
-      setMessage('ABF enregistré et PDF final généré. Vous pouvez maintenant corriger visuellement le PDF dans l’éditeur intégré, puis exporter la version modifiée.');
-    } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs ABF modifiables."); }
-    finally { setLoading(false); }
-  }
-
-  async function updatePdfFields(path: string, fields: Record<string, string>) {
-    if (!selected || !token || !path || Object.keys(fields).length === 0) return;
-    setLoading(true); setMessage('');
-    try {
-      const result = await api<{ output_path: string }>(`/api/prospects/${selected.id}/pdf-fields`, { method: 'PATCH', body: JSON.stringify({ path, fields }) }, token);
-      await refresh(selected.id);
-      setPdfPath(result.output_path);
-      setMessage('Champs du PDF mis à jour. Les modifications sont enregistrées et rechargées ci-dessous.');
-    } catch { setMessage('Impossible d’enregistrer les modifications du PDF. Vérifiez les champs puis réessayez.'); }
-    finally { setLoading(false); }
-  }
-
-  async function saveAbfPageEdits() {
-    if (!selected || !token) return;
-    setLoading(true); setMessage(''); setPdfPath('');
-    try {
-      const updatedProspect = await api<ProspectDetail>(`/api/prospects/${selected.id}`, { method: 'PATCH', body: JSON.stringify(payloadFromForm(editForm)) }, token);
-      const updatedReview = await api<ProspectDetail>(`/api/prospects/${selected.id}/review`, { method: 'PATCH', body: JSON.stringify(reviewPayload(reviewForm)) }, token);
-      const merged = { ...updatedProspect, advisor_review: updatedReview.advisor_review, documents: updatedReview.documents || updatedProspect.documents };
-      setSelected(merged);
-      setEditForm(formFromPayload(merged.payload));
-      setReviewForm(reviewFromDetail(merged, session));
-      setEditing(false);
-      setMessage('Corrections enregistrées. Le prochain PDF ABF reprendra exactement ces champs.');
-      await refresh(merged.id);
-    } catch { setMessage('Enregistrement impossible. Vérifiez les champs obligatoires.'); }
+      setMessage('PDF généré. Toutes vos modifications ont été prises en compte.');
+    } catch { setMessage("Impossible de générer l'ABF pour ce prospect. Vérifiez les champs puis réessayez."); }
     finally { setLoading(false); }
   }
 
@@ -563,9 +626,8 @@ function AdvisorDashboard() {
         {message && <div className="notice success"><CheckCircle2 size={20}/> {message}{latestPdfPath && <button className="inline-link" onClick={() => downloadPdf(latestPdfPath)}>Télécharger le PDF ABF</button>}</div>}
         {!selected && <section className="advisor-card"><p className="muted">Aucun prospect sélectionné.</p></section>}
         {selected && p && <>
-          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions"><button className="refresh-button" disabled={loading} onClick={saveAbfPageEdits}><CheckCircle2 size={16}/> Enregistrer les corrections</button>{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}<button className="submit-button" disabled={loading} onClick={generateAbf}>{loading ? <Loader2 className="spin"/> : <Download size={18}/>} Générer le PDF final</button></div></section>
-          <PdfFormEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} onGenerate={generateAbf} onUpdateFields={updatePdfFields} onDownload={() => downloadPdf(latestPdfPath)} />
-          <EditableAbfPreview form={editForm} setForm={setEditForm} review={reviewForm} setReview={setReviewForm} loading={loading} onSave={saveAbfPageEdits} onExport={generateAbf} />
+          <section className="advisor-card client-main client-spotlight"><div className="client-avatar">{selectedInitials}</div><div><div className="client-title-line"><h2>{selected.client_name}</h2><span>{selectedStatus}</span></div><p>{safe(selected.phone)} · {safe(selected.email)}</p><p className="muted">Dossier reçu le {new Date(selected.created_at).toLocaleString('fr-CA')}</p></div><div className="client-actions">{pdfPreviewUrl && <a className="refresh-button" href={pdfPreviewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF final</a>}</div></section>
+          <PdfFormEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} values={pdfValues} originals={pdfOriginals} onFieldsLoaded={handlePdfFieldsLoaded} onFieldChange={setPdfFieldValue} onReset={resetPdfFields} onSave={savePdfFields} onGenerate={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
         </>}
       </section>
@@ -673,17 +735,18 @@ function pdfViewerUrl(path: string, token?: string) {
   return path && token ? `/abf/view?path=${encodeURIComponent(path)}&token=${encodeURIComponent(token)}#zoom=page-width` : '';
 }
 
-function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpdateFields, onDownload }: { previewUrl: string; pdfPath: string; token: string; loading: boolean; onGenerate: () => void; onUpdateFields: (path: string, fields: Record<string, string>) => void; onDownload: () => void }) {
+function PdfFormEditor({ previewUrl, pdfPath, token, loading, values, originals, onFieldsLoaded, onFieldChange, onReset, onSave, onGenerate, onDownload }: { previewUrl: string; pdfPath: string; token: string; loading: boolean; values: Record<string, string>; originals: Record<string, string>; onFieldsLoaded: (fields: PdfField[]) => void; onFieldChange: (name: string, value: string) => void; onReset: () => void; onSave: () => void; onGenerate: () => void; onDownload: () => void }) {
   const [pageCount, setPageCount] = useState(1);
   const [page, setPage] = useState(0);
   const [fields, setFields] = useState<PdfField[]>([]);
-  const [values, setValues] = useState<Record<string, string>>({});
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const loadedRef = React.useRef(onFieldsLoaded);
+  loadedRef.current = onFieldsLoaded;
 
   useEffect(() => {
-    setPage(0); setFields([]); setValues({}); setLoadError('');
-    if (!pdfPath || !token) return;
+    setPage(0); setFields([]); setLoadError('');
+    if (!pdfPath || !token) { loadedRef.current([]); return; }
     setFieldsLoading(true);
     Promise.all([
       api<{ page_count: number }>(`/api/pdf/info?path=${encodeURIComponent(pdfPath)}`, undefined, token),
@@ -692,7 +755,7 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpda
       .then(([info, data]) => {
         setPageCount(Math.max(info.page_count || 1, 1));
         setFields(data.fields || []);
-        setValues(Object.fromEntries((data.fields || []).map((field) => [field.name, field.value || ''])));
+        loadedRef.current(data.fields || []);
       })
       .catch(() => setLoadError('Impossible de charger les champs du PDF pour ce dossier.'))
       .finally(() => setFieldsLoading(false));
@@ -700,32 +763,23 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpda
 
   const pageIndexes = Array.from({ length: pageCount }, (_, index) => index);
   const imageUrlForPage = (pageIndex: number) => pdfPath && token ? `/api/pdf/page-image?path=${encodeURIComponent(pdfPath)}&page=${pageIndex}&token=${encodeURIComponent(token)}&v=${encodeURIComponent(pdfPath)}` : '';
-  const originalByName = useMemo(() => Object.fromEntries(fields.map((field) => [field.name, field.value || ''])), [fields]);
-  const changedFields = useMemo(() => {
-    const diff: Record<string, string> = {};
-    for (const field of fields) {
-      if ((values[field.name] ?? '') !== (originalByName[field.name] ?? '')) diff[field.name] = values[field.name] ?? '';
-    }
-    return diff;
-  }, [fields, values, originalByName]);
-  const changedCount = Object.keys(changedFields).length;
-  function setFieldValue(name: string, value: string) { setValues((current) => ({ ...current, [name]: value })); }
-  function resetChanges() { setValues(Object.fromEntries(fields.map((field) => [field.name, field.value || '']))); }
+  const changedCount = fields.reduce((count, field) => count + ((values[field.name] ?? '') !== (originals[field.name] ?? '') ? 1 : 0), 0);
 
   return <section className="advisor-card pdf-editor-card">
     <div className="pdf-editor-head">
       <div><p className="eyebrow">Éditeur PDF intégré</p><h2>Modifier directement les champs du PDF</h2><p>Cliquez dans n’importe quel champ affiché sur le PDF, corrigez la valeur, puis enregistrez. Les modifications sont écrites dans les vrais champs du formulaire ABF, sans repasser par le formulaire client.</p></div>
-      <div className="edit-actions"><button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Régénérer depuis le formulaire</button>{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
+      <div className="edit-actions">{previewUrl && <a className="refresh-button" href={previewUrl} target="_blank" rel="noreferrer"><FileText size={16}/> Voir le PDF</a>}{pdfPath && <button className="refresh-button" type="button" onClick={onDownload}><FileText size={16}/> Télécharger</button>}</div>
     </div>
-    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF final généré pour ce dossier.</strong><span>Remplissez ou corrigez les champs ABF ci-dessous, puis cliquez sur “Générer le PDF final”.</span></div>}
+    {!previewUrl && <div className="pdf-empty-state"><FileText size={34}/><strong>Aucun PDF généré pour ce dossier.</strong><span>Cliquez sur « Générer le PDF » pour créer le document ABF à partir des informations du client, puis modifiez directement les champs affichés.</span><button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer le PDF</button></div>}
     {previewUrl && <>
       <div className="pdf-editor-toolbar">
         <button type="button" onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Page précédente</button>
         <strong>Page {page + 1} / {pageCount}</strong>
         <button type="button" onClick={() => setPage(Math.min(pageCount - 1, page + 1))} disabled={page + 1 >= pageCount}>Page suivante</button>
         <div className="pdf-page-jump" aria-label="Accès rapide aux pages PDF">{pageIndexes.map((pageIndex) => <button key={pageIndex} type="button" className={pageIndex === page ? 'active' : ''} onClick={() => setPage(pageIndex)}>P{pageIndex + 1}</button>)}</div>
-        <button type="button" onClick={resetChanges} disabled={changedCount === 0}>Annuler les modifications</button>
-        <button className="submit-button compact" type="button" disabled={loading || changedCount === 0} onClick={() => onUpdateFields(pdfPath, changedFields)}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
+        <button type="button" onClick={onReset} disabled={changedCount === 0}>Annuler les modifications</button>
+        <button className="refresh-button" type="button" disabled={loading || changedCount === 0} onClick={onSave}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
+        <button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer le PDF</button>
       </div>
       <p className="pdf-helper">{fieldsLoading ? 'Chargement des champs du PDF…' : loadError || `Les ${fields.length} champs éditables du PDF sont superposés à l’aperçu ci-dessous. Modifiez-les directement, même sur téléphone, puis enregistrez. Champs modifiés : ${changedCount}.`}</p>
       <div className="pdf-canvas-shell all-pages">
@@ -739,90 +793,31 @@ function PdfFormEditor({ previewUrl, pdfPath, token, loading, onGenerate, onUpda
               {pageFields.map((field) => {
                 const [x0, y0, x1, y1] = field.rect;
                 const style: React.CSSProperties = { left: `${x0 * 100}%`, top: `${y0 * 100}%`, width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%` };
-                const changed = (values[field.name] ?? '') !== (originalByName[field.name] ?? '');
+                const changed = (values[field.name] ?? '') !== (originals[field.name] ?? '');
                 const common = { value: values[field.name] ?? '', title: field.name, onFocus: () => setPage(pageIndex), 'aria-label': field.name };
                 return <div className={changed ? 'pdf-field-overlay changed' : 'pdf-field-overlay'} key={`${field.name}-${x0}-${y0}`} style={style}>
                   {field.multiline
-                    ? <textarea {...common} onChange={(event) => setFieldValue(field.name, event.target.value)} />
+                    ? <textarea {...common} onChange={(event) => onFieldChange(field.name, event.target.value)} />
                     : field.options && field.options.length > 0
-                      ? <select {...common} onChange={(event) => setFieldValue(field.name, event.target.value)}><option value="">—</option>{field.options.map((option) => <option key={option} value={option}>{option}</option>)}</select>
-                      : <input {...common} maxLength={field.max_length || undefined} onChange={(event) => setFieldValue(field.name, event.target.value)} />}
+                      ? <select {...common} onChange={(event) => onFieldChange(field.name, event.target.value)}><option value="">—</option>{field.options.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+                      : <input {...common} maxLength={field.max_length || undefined} onChange={(event) => onFieldChange(field.name, event.target.value)} />}
                 </div>;
               })}
             </div>
           </div>;
         })}
       </div>
+      <div className="pdf-editor-footer">
+        <span>{changedCount > 0 ? `${changedCount} champ(s) modifié(s) non enregistré(s).` : 'Aucune modification en attente.'}</span>
+        <div className="pdf-editor-footer-actions">
+          <button className="refresh-button" type="button" disabled={loading || changedCount === 0} onClick={onSave}>{loading ? <Loader2 className="spin"/> : <CheckCircle2 size={16}/>} Enregistrer les modifications</button>
+          <button className="submit-button compact" type="button" disabled={loading} onClick={onGenerate}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer le PDF</button>
+        </div>
+      </div>
     </>}
   </section>;
 }
 
-
-function EditableAbfPreview({ form, setForm, review, setReview, loading, onSave, onExport }: { form: FormState; setForm: (form: FormState) => void; review: ReviewState; setReview: (form: ReviewState) => void; loading: boolean; onSave: () => void; onExport: () => void }) {
-  const setClient = (key: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [key]: event.target.value });
-  const setAdvisor = (key: keyof ReviewState) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setReview({ ...review, [key]: event.target.value });
-  const automaticCoverage = Math.max((numberValue(form.annualIncome) * numberValue(review.replacement_years)) - numberValue(form.totalAssets) + numberValue(form.totalDebts), 0);
-  const displayedCoverage = numberValue(review.final_recommended_coverage) || automaticCoverage;
-  return <section className="advisor-card abf-editor-card">
-    <div className="abf-editor-head">
-      <div><p className="eyebrow">ABF visible et modifiable dans l’espace</p><h2>Formulaire ABF à corriger ici</h2><p>Tapez directement dans les champs ci-dessous, même sur téléphone. Aucun clic sur un lien PDF n’est nécessaire pour modifier le dossier.</p></div>
-      <div className="edit-actions"><button className="refresh-button" type="button" disabled={loading} onClick={onSave}><CheckCircle2 size={16}/> Enregistrer</button><button className="submit-button compact" type="button" disabled={loading} onClick={onExport}>{loading ? <Loader2 className="spin"/> : <Download size={16}/>} Générer PDF final</button></div>
-    </div>
-    <div className="abf-paper">
-      <div className="abf-paper-title"><div><span>FINAB Solution</span><strong>ABF — Dossier client</strong></div><small>Document de travail conseiller</small></div>
-      <div className="abf-band">1. Identification du client</div>
-      <div className="abf-fields three">
-        <AbfField label="Nom" value={form.legalLastName} onChange={setClient('legalLastName')} />
-        <AbfField label="Prénoms" value={form.firstNames} onChange={setClient('firstNames')} />
-        <AbfField label="Date de naissance" value={form.dateOfBirth} onChange={setClient('dateOfBirth')} type="date" />
-        <AbfField label="Lieu de naissance" value={form.placeOfBirth} onChange={setClient('placeOfBirth')} />
-        <label className="abf-field"><span>Situation familiale</span><select value={form.maritalStatus} onChange={setClient('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
-        <AbfField label="Enfants à charge" value={form.dependents} onChange={setClient('dependents')} inputMode="numeric" />
-        <AbfField label="Arrivée au Canada" value={form.arrivalInCanada} onChange={setClient('arrivalInCanada')} type="date" />
-        <AbfField label="Téléphone" value={form.phone} onChange={setClient('phone')} />
-        <AbfField label="Courriel" value={form.email} onChange={setClient('email')} />
-      </div>
-      <AbfArea label="Adresse complète" value={form.address} onChange={setClient('address')} />
-      <div className="abf-band">2. Emploi, revenus et situation financière</div>
-      <div className="abf-fields two">
-        <AbfField label="Emploi / titre / poste" value={form.occupation} onChange={setClient('occupation')} />
-        <AbfField label="Adresse emploi" value={form.employerAddress} onChange={setClient('employerAddress')} />
-        <AbfField label="Revenu annuel" value={form.annualIncome} onChange={setClient('annualIncome')} inputMode="decimal" />
-        <AbfField label="Valeur totale des biens" value={form.totalAssets} onChange={setClient('totalAssets')} inputMode="decimal" />
-        <AbfField label="Total des dettes" value={form.totalDebts} onChange={setClient('totalDebts')} inputMode="decimal" />
-        <AbfField label="Budget mensuel confortable" value={form.acceptableBudget} onChange={setClient('acceptableBudget')} inputMode="decimal" />
-      </div>
-      <div className="abf-band">3. Assurance, santé et objectifs</div>
-      <div className="abf-fields two">
-        <label className="abf-field"><span>Assurance vie existante</span><select value={form.hasExistingInsurance} onChange={setClient('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
-        <AbfField label="Taille" value={form.height} onChange={setClient('height')} />
-        <AbfField label="Poids" value={form.weight} onChange={setClient('weight')} />
-        <AbfField label="Code postal" value={form.postalCode} onChange={setClient('postalCode')} />
-      </div>
-      <AbfArea label="Détails assurances / placements actuels" value={form.existingInsuranceDetails} onChange={setClient('existingInsuranceDetails')} />
-      <AbfArea label="Si aucune assurance : raison" value={form.noInsuranceReason} onChange={setClient('noInsuranceReason')} />
-      <AbfArea label="Disponibilités" value={form.availability} onChange={setClient('availability')} />
-      <AbfArea label="Projets prioritaires / besoins familiaux" value={form.priorityProjects} onChange={setClient('priorityProjects')} />
-      <div className="abf-band">4. Recommandation du conseiller</div>
-      <div className="abf-calculation-strip"><div><span>Couverture calculée</span><strong>{money(displayedCoverage)} $</strong></div><div><span>Années de revenu</span><strong>{review.replacement_years || '0'}</strong></div><div><span>Budget client</span><strong>{money(form.acceptableBudget)} $/mois</strong></div></div>
-      <div className="abf-fields three">
-        <AbfField label="Conseiller" value={review.advisor_name} onChange={setAdvisor('advisor_name')} />
-        <AbfField label="Téléphone conseiller" value={review.advisor_phone} onChange={setAdvisor('advisor_phone')} />
-        <AbfField label="Courriel conseiller" value={review.advisor_email} onChange={setAdvisor('advisor_email')} />
-        <AbfField label="Date validation" value={review.signed_date} onChange={setAdvisor('signed_date')} type="date" />
-        <AbfField label="Années remplacement revenu" value={review.replacement_years} onChange={setAdvisor('replacement_years')} inputMode="numeric" />
-        <AbfField label="Couverture finale recommandée" value={review.final_recommended_coverage} onChange={setAdvisor('final_recommended_coverage')} inputMode="decimal" placeholder={`${money(automaticCoverage)} $ automatique`} />
-        <AbfField label="Budget recommandation 1" value={review.recommendation_1_budget} onChange={setAdvisor('recommendation_1_budget')} inputMode="decimal" />
-        <AbfField label="Budget recommandation 2" value={review.recommendation_2_budget} onChange={setAdvisor('recommendation_2_budget')} inputMode="decimal" />
-        <AbfField label="Budget préféré client" value={review.client_preference_budget} onChange={setAdvisor('client_preference_budget')} inputMode="decimal" />
-      </div>
-      <AbfArea label="Notes recommandation 1" value={review.recommendation_1_notes} onChange={setAdvisor('recommendation_1_notes')} />
-      <AbfArea label="Notes recommandation 2" value={review.recommendation_2_notes} onChange={setAdvisor('recommendation_2_notes')} />
-      <AbfArea label="Préférence client / justification" value={review.preference_notes} onChange={setAdvisor('preference_notes')} />
-      <AbfArea label="Notes finales du conseiller" value={review.agent_notes} onChange={setAdvisor('agent_notes')} />
-    </div>
-  </section>;
-}
 
 function AbfField({ label, value, onChange, type = 'text', inputMode, placeholder }: { label: string; value: string; onChange: (event: React.ChangeEvent<HTMLInputElement>) => void; type?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']; placeholder?: string }) {
   return <label className="abf-field"><span>{label}</span><input type={type} value={value} onChange={onChange} inputMode={inputMode} placeholder={placeholder} /></label>;
@@ -864,17 +859,26 @@ function EditableProspectForm({ form, setForm, loading, onSave, onCancel }: { fo
       <label>Nom de famille<input value={form.legalLastName} onChange={set('legalLastName')} /></label>
       <label>Prénoms<input value={form.firstNames} onChange={set('firstNames')} /></label>
       <label>Date de naissance<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
-      <label>Lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+      <label>Sexe<select value={form.sex} onChange={set('sex')}><option value="">Sélectionner</option><option value="Homme">Homme</option><option value="Femme">Femme</option><option value="Non précisé">Non précisé</option></select></label>
+      <label>Pays / lieu de naissance<input value={form.placeOfBirth} onChange={set('placeOfBirth')} /></label>
+      <label>Statut de résident<input value={form.residencyStatus} onChange={set('residencyStatus')} /></label>
       <label>Situation familiale<select value={form.maritalStatus} onChange={set('maritalStatus')}><option value="">Sélectionner</option><option value="marié">Marié</option><option value="célibataire">Célibataire</option><option value="monoparental">Monoparental avec Enfants</option><option value="conjoint de fait">Conjoint de fait</option><option value="autre">Autre</option></select></label>
       <label>Enfants à charge<input value={form.dependents} onChange={set('dependents')} inputMode="numeric" /></label>
       <label>Date d'arrivée au Canada<input type="date" value={form.arrivalInCanada} onChange={set('arrivalInCanada')} /></label>
+      <label>Le client est-il le propriétaire ?<select value={form.insuredIsOwner} onChange={set('insuredIsOwner')}><option value="oui">Oui (assuré = propriétaire)</option><option value="non">Non (souscrit pour un tiers)</option></select></label>
+      {form.insuredIsOwner === 'non' && <label>Nom du propriétaire<input value={form.ownerName} onChange={set('ownerName')} /></label>}
+      {form.insuredIsOwner === 'non' && <label>Lien propriétaire / assuré<input value={form.ownerRelationship} onChange={set('ownerRelationship')} /></label>}
       <label>Téléphone<input value={form.phone} onChange={set('phone')} /></label>
       <label>Courriel<input value={form.email} onChange={set('email')} /></label>
       <label className="span-2">Adresse de domicile<input value={form.address} onChange={set('address')} placeholder="Rue, ville, province" /></label>
       <label>Code postal<input value={form.postalCode} onChange={set('postalCode')} /></label>
       <label className="span-2">Emploi actuel, titre et poste<input value={form.occupation} onChange={set('occupation')} /></label>
+      <label>Nom de l'employeur<input value={form.employerName} onChange={set('employerName')} /></label>
       <label className="span-2">Adresse emploi<input value={form.employerAddress} onChange={set('employerAddress')} /></label>
-      <label>Revenu annuel<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>
+      <label>Type de revenu<select value={form.incomeType} onChange={set('incomeType')}><option value="annuel">Annuel</option><option value="horaire">Horaire</option></select></label>
+      {form.incomeType === 'horaire'
+        ? <label>Taux horaire net<input value={form.hourlyRate} onChange={set('hourlyRate')} inputMode="decimal" /></label>
+        : <label>Revenu annuel<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>}
       <label>Total des biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" /></label>
       <label>Total des dettes<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" /></label>
       <label>Assurance vie existante<select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
@@ -884,7 +888,12 @@ function EditableProspectForm({ form, setForm, loading, onSave, onCancel }: { fo
       <label>Taille<input value={form.height} onChange={set('height')} /></label>
       <label>Poids<input value={form.weight} onChange={set('weight')} /></label>
       <label className="span-2">Disponibilités<textarea value={form.availability} onChange={set('availability')} /></label>
-      <label className="span-2">Projets prioritaires<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
+      <label className="span-2">Objectifs court terme<textarea value={form.shortTermGoals} onChange={set('shortTermGoals')} /></label>
+      <label className="span-2">Objectifs moyen terme<textarea value={form.mediumTermGoals} onChange={set('mediumTermGoals')} /></label>
+      <label className="span-2">Objectifs long terme<textarea value={form.longTermGoals} onChange={set('longTermGoals')} /></label>
+      <label className="span-2">Situation financière actuelle<textarea value={form.currentFinancialSituation} onChange={set('currentFinancialSituation')} /></label>
+      <label className="span-2">Besoin de la famille en cas de décès<textarea value={form.familyNeedIfDeath} onChange={set('familyNeedIfDeath')} /></label>
+      <label className="span-2">Autres informations<textarea value={form.priorityProjects} onChange={set('priorityProjects')} /></label>
     </div>
   </section>;
 }

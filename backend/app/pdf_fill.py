@@ -8,23 +8,13 @@ import fitz
 _EDITABLE_TYPES = {"Text", "ComboBox"}
 _MULTILINE_FLAG = 1 << 12  # Ff bit 13 (Multiline) per the PDF spec.
 
-
-def _set_need_appearances(doc: fitz.Document) -> bool:
-    """Ask every PDF reader to regenerate field appearance streams.
-
-    PyMuPDF writes the field value but the visible appearance can lag behind
-    depending on the viewer. Flagging NeedAppearances on the AcroForm catalog
-    guarantees the filled/edited value is rendered everywhere, including the
-    in-app viewer and desktop PDF readers.
-    """
-    try:
-        root = doc.pdf_catalog()
-        if not doc.xref_get_key(root, "AcroForm")[0]:
-            return False
-        doc.xref_set_key(root, "AcroForm/NeedAppearances", "true")
-        return True
-    except Exception:
-        return False
+# NOTE: we deliberately do NOT set the AcroForm NeedAppearances flag. PyMuPDF's
+# widget.update() bakes a fresh appearance stream (/AP) holding the single
+# current value with the field's own bold default appearance. Setting
+# NeedAppearances on top asks readers to re-render the value over that baked
+# appearance, which is what caused the old and new values to overlap in the
+# same field. Relying on the baked /AP keeps one clean, bold value in every
+# reader — identical to the original fill.
 
 
 def _keep_editable(widget: fitz.Widget) -> None:
@@ -62,7 +52,6 @@ def fill_acroform(template: Path, output: Path, values: Mapping[str, str]) -> di
             widget.update()
             filled.append({"page": page.number + 1, "field": name})
 
-    _set_need_appearances(doc)
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(output, garbage=3, deflate=True, incremental=False)
     doc.close()
@@ -126,8 +115,9 @@ def update_acroform_fields(source: Path, output: Path, values: Mapping[str, str]
 
     The existing document is opened and patched in place (every other field,
     page and visual element is preserved) instead of regenerating the ABF from
-    the original web form. Fields stay editable and NeedAppearances is refreshed
-    so the new values render correctly in every reader.
+    the original web form. Fields stay editable and widget.update() re-bakes the
+    appearance so each edited field shows a single clean value with no leftover
+    of the previous text underneath.
     """
     if not source.exists():
         raise FileNotFoundError(source)
@@ -151,7 +141,6 @@ def update_acroform_fields(source: Path, output: Path, values: Mapping[str, str]
             else:
                 widget.update()
 
-    _set_need_appearances(doc)
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(output, garbage=3, deflate=True, incremental=False)
     doc.close()
