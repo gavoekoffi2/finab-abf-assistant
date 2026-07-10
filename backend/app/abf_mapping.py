@@ -50,6 +50,16 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
     existing = fna["current_life"]
     monthly_net = e.monthly_net_income or round(fna["annual_income"] / 12, 2)
 
+    # Client budget block (page 7). The monthly surplus is always shown and is
+    # simply: revenu net mensuel - dépenses - remboursement de dette - épargnes.
+    # When the client declared none of those the surplus equals the net income
+    # (e.g. 12 500 $ - 0 - 0 - 0 = 12 500 $), per the advisor's workflow.
+    fin = prospect.financial
+    monthly_surplus = max(
+        0.0,
+        monthly_net - fin.monthly_expenses - fin.monthly_debt_repayment - fin.monthly_savings,
+    )
+
     # Cover page: leave the 'Propriétaire' line blank when the insured is also
     # the owner; otherwise name the paying client.
     owner_name = "" if o.insured_is_owner else (o.name or "")
@@ -138,10 +148,10 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
         # Product suitability page — client budget. Monthly net income defaults
         # to the annual figure / 12 when the client did not give a monthly one.
         "MonthlyNetIncome": money(monthly_net),
-        "Expenses": money(prospect.financial.monthly_expenses) if prospect.financial.monthly_expenses else "",
-        "DebtRepayment": money(prospect.financial.monthly_debt_repayment) if prospect.financial.monthly_debt_repayment else "",
-        "Savings": money(prospect.financial.monthly_savings) if prospect.financial.monthly_savings else "",
-        "Surplus": money(max(0, monthly_net - prospect.financial.monthly_expenses - prospect.financial.monthly_debt_repayment)) if prospect.financial.monthly_expenses else "",
+        "Expenses": money(fin.monthly_expenses) if fin.monthly_expenses else "",
+        "DebtRepayment": money(fin.monthly_debt_repayment) if fin.monthly_debt_repayment else "",
+        "Savings": money(fin.monthly_savings) if fin.monthly_savings else "",
+        "Surplus": money(monthly_surplus),
         "Budget.0": money(review.recommendation_1_budget or prospect.goals.acceptable_monthly_budget),
         "Budget.1": money(review.recommendation_2_budget or prospect.goals.acceptable_monthly_budget),
         "Budget.2": money(review.client_preference_budget or prospect.goals.acceptable_monthly_budget),

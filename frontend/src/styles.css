@@ -62,3 +62,13 @@ input,textarea,select{width:100%;border:1px solid #d4dfec;border-radius:16px;pad
 .pdf-form-canvas{cursor:default}.pdf-field-overlay{position:absolute;z-index:3;box-sizing:border-box}.pdf-field-overlay input,.pdf-field-overlay textarea,.pdf-field-overlay select{width:100%;height:100%;box-sizing:border-box;margin:0;padding:0 3px;border:1px solid rgba(148,163,184,.7);border-radius:2px;background:#ffffff;color:#243244;font-weight:500;font-size:clamp(9px,1.4vw,15px);line-height:1.05;box-shadow:none}.pdf-field-overlay textarea{padding:2px 3px;resize:none;overflow:hidden}.pdf-field-overlay input:focus,.pdf-field-overlay textarea:focus,.pdf-field-overlay select:focus{outline:0;border-color:#1d4ed8;background:#fff;box-shadow:0 0 0 2px rgba(37,99,235,.35)}.pdf-field-overlay.changed input,.pdf-field-overlay.changed textarea,.pdf-field-overlay.changed select{border-color:#b45309;background:#fef3c7;box-shadow:0 0 0 1px rgba(180,83,9,.4)}
 .inline-link{border:0;background:#065f46;color:white;border-radius:999px;padding:8px 12px;font-weight:950;cursor:pointer;margin-left:auto}
 @media(max-width:760px){.pdf-editor-head{display:grid}.pdf-frame{height:72vh;min-height:520px}.pdf-editor-head .edit-actions{width:100%}.inline-link{width:100%;margin-left:0}}
+
+.abf-live-summary{background:linear-gradient(135deg,#ffffff,#f8fbff);margin-bottom:20px}
+.abf-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.abf-summary-grid div{border:1px solid #dbe7f6;background:linear-gradient(135deg,#f8fafc,#fff8df);border-radius:14px;padding:13px}
+.abf-summary-grid span{display:block;color:#64748b;font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.06em}
+.abf-summary-grid strong{display:block;margin-top:4px;color:#082f49;font-size:20px;letter-spacing:-.03em}
+.abf-summary-grid .abf-summary-total{grid-column:1/-1;background:linear-gradient(135deg,#0f2a44,#153f68);border-color:#0f2a44}
+.abf-summary-grid .abf-summary-total span{color:#cbd5e1}
+.abf-summary-grid .abf-summary-total strong{color:#fff;font-size:26px}
+@media(max-width:760px){.abf-summary-grid{grid-template-columns:1fr}}

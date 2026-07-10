@@ -128,6 +128,38 @@ def test_recommendations_follow_example_structure() -> None:
     assert "300 $" in pref  # preference budget surfaced
 
 
+def test_existing_coverage_reduces_total_need() -> None:
+    prospect = _prospect()
+    prospect.employment = EmploymentInfo(annual_income=100000)  # 24yo -> 30 years
+    prospect.insurance.has_existing_life_insurance = True
+    prospect.insurance.existing_life_coverage = 2_400_000
+    fna = estimate_financial_need(prospect, 0)
+    assert fna["income_replacement"] == 3_000_000
+    assert fna["current_life"] == 2_400_000
+    # Total need is net of the existing coverage: 3,000,000 - 2,400,000.
+    assert fna["total_need"] == 600_000
+    values = build_abf_values(prospect, AdvisorReview())
+    # Existing coverage surfaces on the FNA page and on every rec column.
+    assert "2,400,000" in values["CurrentLife"]
+    assert "2,400,000" in values["CurrentLife0"]
+    assert "600,000" in values["TotalFNA"]
+
+
+def test_monthly_surplus_always_computed() -> None:
+    prospect = _prospect()
+    prospect.employment = EmploymentInfo(annual_income=150000)  # 12,500 / month
+    # No expenses/debt/savings declared -> surplus equals the net income.
+    values = build_abf_values(prospect, AdvisorReview())
+    assert "12,500" in values["MonthlyNetIncome"]
+    assert "12,500" in values["Surplus"]
+    # With declared outflows the surplus subtracts all three.
+    prospect.financial.monthly_expenses = 4000
+    prospect.financial.monthly_debt_repayment = 1000
+    prospect.financial.monthly_savings = 500
+    values = build_abf_values(prospect, AdvisorReview())
+    assert "7,000" in values["Surplus"]  # 12,500 - 4,000 - 1,000 - 500
+
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "samples/private/ABF_VIERGE.pdf"
 
 
