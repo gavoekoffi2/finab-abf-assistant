@@ -36,7 +36,7 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
     e = prospect.employment
     g = prospect.goals
     o = prospect.owner
-    fna = estimate_financial_need(prospect, review.replacement_years)
+    fna = estimate_financial_need(prospect, review.replacement_years, review.education_fund)
     worth = net_worth(prospect)
     rec1, rec2, pref = draft_recommendations(prospect, fna, review)
     signed_date = review.signed_date.isoformat()
@@ -132,7 +132,9 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
         "AnnualIncome": money(fna["annual_income"]),
         "Yearsofincome": str(int(fna["replacement_years"])),
         "Mortgage": money(prospect.financial.mortgage),
-        "EducationandChildcare": money(fna["education_childcare"]),
+        # Jamais pré-rempli automatiquement : le conseiller saisit son forfait
+        # (dans l'app ou directement dans Adobe) et le total se recalcule.
+        "EducationandChildcare": money(fna["education_childcare"]) if fna["education_childcare"] else "",
         "CurrentLife": money(existing),
         "TotalFNA": money(full_need),
         # Assets/passifs page. A lone asset lands in 'Autres Biens' (AS10).

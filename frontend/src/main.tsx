@@ -61,6 +61,7 @@ type ReviewState = {
   advisor_email: string;
   signed_date: string;
   replacement_years: string;
+  education_fund: string;
   final_recommended_coverage: string;
   recommendation_1_budget: string;
   recommendation_2_budget: string;
@@ -88,6 +89,7 @@ const emptyReview: ReviewState = {
   advisor_email: '',
   signed_date: todayIso(),
   replacement_years: '0',
+  education_fund: '',
   final_recommended_coverage: '',
   recommendation_1_budget: '',
   recommendation_2_budget: '',
@@ -197,6 +199,7 @@ function reviewFromDetail(detail: ProspectDetail | null, session?: AuthSession |
     advisor_email: review.advisor_email || org.advisor_email || session?.user.email || '',
     signed_date: review.signed_date || todayIso(),
     replacement_years: String(review.replacement_years ?? 0),
+    education_fund: String(review.education_fund || ''),
     final_recommended_coverage: String(review.final_recommended_coverage || ''),
     recommendation_1_budget: String(review.recommendation_1_budget || budget || ''),
     recommendation_2_budget: String(review.recommendation_2_budget || (Number(budget) ? Number(budget) * 1.5 : '') || ''),
@@ -216,6 +219,7 @@ function reviewPayload(form: ReviewState) {
     advisor_email: form.advisor_email,
     signed_date: form.signed_date || todayIso(),
     replacement_years: numberValue(form.replacement_years),
+    education_fund: numberValue(form.education_fund),
     final_recommended_coverage: numberValue(form.final_recommended_coverage),
     recommendation_1_budget: numberValue(form.recommendation_1_budget),
     recommendation_2_budget: numberValue(form.recommendation_2_budget),
@@ -250,8 +254,9 @@ function computeAbfPreview(form: FormState, review: ReviewState) {
   const requestedYears = numberValue(review.replacement_years);
   const years = requestedYears > 0 ? requestedYears : suggestedYears(age);
   const debts = numberValue(form.totalDebts);
-  const dependents = numberValue(form.dependents);
-  const education = dependents * 25000;
+  // Fonds d'éducation : jamais automatique — forfait saisi par le conseiller
+  // (repère : 20 000 $ x 4 ans x nombre d'enfants). Il augmente le besoin total.
+  const education = numberValue(review.education_fund);
   const existing = form.hasExistingInsurance === 'oui' ? numberValue(form.existingCoverageAmount) : 0;
   const incomeReplacement = annual * years;
   const totalNeed = Math.max(0, debts + incomeReplacement + education - existing);
@@ -259,6 +264,47 @@ function computeAbfPreview(form: FormState, review: ReviewState) {
   const surplus = Math.max(0, monthlyNet - numberValue(form.monthlyExpenses) - numberValue(form.monthlyDebtRepayment) - numberValue(form.monthlySavings));
   const half = Math.round(totalNeed / 2);
   return { annual, age, years, debts, education, existing, incomeReplacement, totalNeed, monthlyNet, surplus, half };
+}
+
+// --- Live recalculation inside the integrated PDF editor -------------------
+// The exported PDF embeds the same formulas as AcroForm JavaScript (run by
+// Adobe); the browser overlay does not execute PDF JavaScript, so these
+// mirrors keep the totals moving while the advisor edits fields on screen.
+const parsePdfMoney = (raw: string | undefined) => {
+  let s = String(raw ?? '').replace(/[^0-9.,-]/g, '');
+  if (s.includes('.') && s.includes(',')) s = s.replace(/,/g, '');
+  else if (s.includes(',')) s = /,\d{1,2}$/.test(s) ? s.replace(',', '.') : s.replace(/,/g, '');
+  const v = parseFloat(s);
+  return Number.isNaN(v) ? 0 : v;
+};
+const pdfMoney = (v: number) => `C$ ${v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pdfCompactMoney = (v: number) => v === 0 ? '$ 0' : `$ ${Math.round(v).toLocaleString('en-CA')}`;
+const PDF_CALC_TRIGGERS = new Set(['Creditcards', 'LinesofCredits', 'CarLoan', 'Student Loan', 'PersonalLoan', 'OtherDebts', 'Funeral Expense', 'DebtsFuneral', 'AnnualIncome', 'Yearsofincome', 'IncometobeReplaced', 'Mortgage', 'EducationFund', 'ChildCare', 'EducationandChildcare', 'CurrentLife', 'TotalFNA', 'MonthlyNetIncome', 'Expenses', 'DebtRepayment', 'Savings']);
+
+function recomputePdfCalculations(values: Record<string, string>, changed: string): Record<string, string> {
+  if (!PDF_CALC_TRIGGERS.has(changed)) return values;
+  const next = { ...values };
+  const num = (name: string) => parsePdfMoney(next[name]);
+  const has = (name: string) => String(next[name] ?? '').trim() !== '';
+  // Never overwrite the field the advisor is typing into right now.
+  const put = (name: string, value: string) => { if (name in next && name !== changed) next[name] = value; };
+  put('DebtsFuneral', pdfMoney(num('Creditcards') + num('LinesofCredits') + num('CarLoan') + num('Student Loan') + num('PersonalLoan') + num('OtherDebts') + num('Funeral Expense')));
+  put('IncometobeReplaced', pdfMoney(num('AnnualIncome') * num('Yearsofincome')));
+  if (has('EducationFund') || has('ChildCare')) put('EducationandChildcare', pdfMoney(num('EducationFund') + num('ChildCare')));
+  const total = Math.max(0, num('DebtsFuneral') + num('IncometobeReplaced') + num('Mortgage') + num('EducationandChildcare') - num('CurrentLife'));
+  put('TotalFNA', pdfMoney(total));
+  const annual = num('AnnualIncome');
+  if (annual > 0) put('MonthlyNetIncome', pdfMoney(annual / 12));
+  put('Surplus', pdfMoney(Math.max(0, num('MonthlyNetIncome') - num('Expenses') - num('DebtRepayment') - num('Savings'))));
+  // Recommendation columns 1 & 2 always mirror the full need; the existing
+  // coverage follows on all three. The client-preference totals and the
+  // universal/term split stay manual — those are the advisor's choices.
+  // Read the effective total back so a hand-typed TotalFNA also propagates.
+  const compactTotal = pdfCompactMoney(num('TotalFNA'));
+  for (const name of ['TotalFNA0', 'TotalFNA1', 'Text Field16', 'Text Field22']) put(name, compactTotal);
+  const compactExisting = pdfCompactMoney(num('CurrentLife'));
+  for (const name of ['CurrentLife0', 'CurrentLife1', 'CurrentLife2']) put(name, compactExisting);
+  return next;
 }
 
 function AbfCalculationSummary({ form, review }: { form: FormState; review: ReviewState }) {
@@ -523,7 +569,10 @@ function AdvisorDashboard() {
     setPdfOriginals(merged);
   }
   function setPdfFieldValue(name: string, value: string) {
-    setPdfValues((current) => ({ ...current, [name]: value }));
+    // Recompute the dependent totals (revenus à remplacer, besoin total,
+    // surplus, colonnes de recommandation) exactly like the JavaScript
+    // embedded in the exported PDF does inside Adobe.
+    setPdfValues((current) => recomputePdfCalculations({ ...current, [name]: value }, name));
   }
   function resetPdfFields() { setPdfValues(pdfOriginals); }
   function pdfFieldDiff(): Record<string, string> {
@@ -906,6 +955,7 @@ function AdvisorReviewForm({ form, setForm, loading, onSave }: { form: ReviewSta
       <label>Courriel conseiller<input value={form.advisor_email} onChange={set('advisor_email')} /></label>
       <label>Date de signature / validation<input type="date" value={form.signed_date} onChange={set('signed_date')} /></label>
       <label>Années de remplacement de revenu<input value={form.replacement_years} onChange={set('replacement_years')} inputMode="numeric" placeholder="0 = automatique selon l'âge (‹30 → 30, 30-49 → 20, 50+ → 15)" /></label>
+      <label>Fonds d'éducation et garde d'enfants<input value={form.education_fund} onChange={set('education_fund')} inputMode="decimal" placeholder="Repère : 20 000 $ × 4 ans × nombre d'enfants — augmente le besoin total" /></label>
       <label>Couverture finale recommandée<input value={form.final_recommended_coverage} onChange={set('final_recommended_coverage')} inputMode="decimal" placeholder="Laisser vide pour utiliser le calcul automatique" /></label>
       <label>Budget recommandation 1<input value={form.recommendation_1_budget} onChange={set('recommendation_1_budget')} inputMode="decimal" /></label>
       <label>Budget recommandation 2<input value={form.recommendation_2_budget} onChange={set('recommendation_2_budget')} inputMode="decimal" /></label>

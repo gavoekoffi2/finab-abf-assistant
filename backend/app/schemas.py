@@ -146,6 +146,10 @@ class AdvisorReview(BaseModel):
     advisor_email: str = "KOFFI.AKPOBI@MYGREATWAY.CA"
     signed_date: date = Field(default_factory=date.today)
     replacement_years: int = Field(default=0, ge=0, le=90)
+    # 'Fonds d'éducation et garde d'enfants' : montant forfaitaire du conseiller.
+    # Repère métier : 20 000 $ x 4 années universitaires x nombre d'enfants,
+    # mais le conseiller reste libre du forfait. 0 = champ laissé vide dans le PDF.
+    education_fund: float = Field(default=0, ge=0)
     final_recommended_coverage: float = Field(default=0, ge=0)
     critical_illness_amount: float = Field(default=30000, ge=0)
     recommendation_1_budget: float = Field(default=0, ge=0)

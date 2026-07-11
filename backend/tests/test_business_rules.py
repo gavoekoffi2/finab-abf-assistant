@@ -145,6 +145,24 @@ def test_existing_coverage_reduces_total_need() -> None:
     assert "600,000" in values["TotalFNA"]
 
 
+def test_education_fund_is_advisor_controlled_and_increases_need() -> None:
+    prospect = _prospect(dependents_count=2)
+    prospect.employment = EmploymentInfo(annual_income=100000)  # 24yo -> 30 years
+    # Children alone never auto-fill the education fund: the advisor decides.
+    auto = estimate_financial_need(prospect, 0)
+    assert auto["education_childcare"] == 0
+    assert auto["total_need"] == 3_000_000
+    values = build_abf_values(prospect, AdvisorReview())
+    assert values["EducationandChildcare"] == ""  # left blank for the advisor
+    # The advisor's forfait (e.g. 20k x 4 years x 1 child) raises the total.
+    fna = estimate_financial_need(prospect, 0, education_fund=80_000)
+    assert fna["education_childcare"] == 80_000
+    assert fna["total_need"] == 3_080_000
+    values = build_abf_values(prospect, AdvisorReview(education_fund=80_000))
+    assert "80,000" in values["EducationandChildcare"]
+    assert "3,080,000" in values["TotalFNA"]
+
+
 def test_monthly_surplus_always_computed() -> None:
     prospect = _prospect()
     prospect.employment = EmploymentInfo(annual_income=150000)  # 12,500 / month
@@ -161,6 +179,48 @@ def test_monthly_surplus_always_computed() -> None:
 
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "samples/private/ABF_VIERGE.pdf"
+
+
+@pytest.mark.skipif(not TEMPLATE.exists(), reason="private ABF_VIERGE.pdf not available")
+def test_generated_pdf_embeds_auto_calculation(tmp_path) -> None:
+    """The exported ABF must keep recalculating itself in Adobe: every derived
+    field carries a calculation script and the AcroForm declares the order."""
+    import fitz
+
+    from app.pdf_fill import fill_acroform
+
+    prospect = _prospect()
+    prospect.employment = EmploymentInfo(annual_income=50000)
+    values = build_abf_values(prospect, AdvisorReview(replacement_years=15))
+    output = tmp_path / "calc.pdf"
+    fill_acroform(TEMPLATE, output, values)
+
+    doc = fitz.open(output)
+    try:
+        scripted: dict[str, str] = {}
+        for page in doc:
+            for widget in page.widgets() or []:
+                kind, ref = doc.xref_get_key(widget.xref, "AA/C/JS")
+                if kind == "xref":
+                    scripted[widget.field_name] = doc.xref_stream(int(ref.split()[0])).decode()
+                elif kind == "string":
+                    scripted[widget.field_name] = ref
+        for name in ("DebtsFuneral", "IncometobeReplaced", "EducationandChildcare", "TotalFNA", "MonthlyNetIncome", "Surplus", "TotalFNA0", "CurrentLife0"):
+            assert name in scripted, f"{name} lacks a calculation script"
+        assert "FNUM('AnnualIncome')*FNUM('Yearsofincome')" in scripted["IncometobeReplaced"]
+        assert "-FNUM('CurrentLife')" in scripted["TotalFNA"]
+        assert "-FNUM('Savings')" in scripted["Surplus"]
+        # Calculation order so intermediate totals resolve before the totals.
+        catalog = doc.pdf_catalog()
+        kind, value = doc.xref_get_key(catalog, "AcroForm")
+        co_kind, co = (
+            doc.xref_get_key(int(value.split()[0]), "CO")
+            if kind == "xref"
+            else doc.xref_get_key(catalog, "AcroForm/CO")
+        )
+        assert co_kind == "array" and co.count(" R") >= 10
+    finally:
+        doc.close()
 
 
 @pytest.mark.skipif(not TEMPLATE.exists(), reason="private ABF_VIERGE.pdf not available")

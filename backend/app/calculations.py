@@ -53,28 +53,38 @@ def resolve_replacement_years(prospect: ProspectSubmission, requested: int | Non
     return suggested_replacement_years(age_on(prospect.identity.date_of_birth))
 
 
-def estimate_financial_need(prospect: ProspectSubmission, replacement_years: int | None = None) -> dict[str, float]:
+def estimate_financial_need(
+    prospect: ProspectSubmission,
+    replacement_years: int | None = None,
+    education_fund: float = 0.0,
+) -> dict[str, float]:
     """Draft FNA only. Advisor must finalize before PDF export."""
     years = resolve_replacement_years(prospect, replacement_years)
     income = annual_income(prospect.employment)
+    # 'Dettes et frais funéraires' excludes the mortgage: on the ABF form the
+    # mortgage is its own line, added separately into the total below.
     debts = prospect.financial.total_debts or (
         prospect.financial.credit_cards
         + prospect.financial.car_loan
         + prospect.financial.student_loan
         + prospect.financial.personal_loan
-        + prospect.financial.mortgage
     )
+    mortgage = prospect.financial.mortgage
     income_replacement = income * years
-    education_childcare = 0.0
-    if prospect.identity.dependents_count:
-        education_childcare = prospect.identity.dependents_count * 25_000
+    # Fonds d'éducation : jamais pré-rempli automatiquement — c'est le forfait
+    # décidé par le conseiller (repère : 20 000 $ x 4 ans x nombre d'enfants).
+    # Quand il est renseigné, il augmente le besoin total.
+    education_childcare = float(education_fund or 0)
     current_life = prospect.insurance.existing_life_coverage
-    total_need = max(0.0, debts + income_replacement + education_childcare - current_life)
+    # Formule imprimée sur le formulaire : Dettes et frais funéraires + Revenus
+    # + Hypothèque + Éducation - Couverture d'assurance vie actuelle.
+    total_need = max(0.0, debts + income_replacement + mortgage + education_childcare - current_life)
     return {
         "debts": debts,
         "annual_income": income,
         "replacement_years": float(years),
         "income_replacement": income_replacement,
+        "mortgage": mortgage,
         "education_childcare": education_childcare,
         "current_life": current_life,
         "total_need": total_need,
