@@ -28,7 +28,11 @@ type FormState = {
   hourlyRate: string;
   totalAssets: string;
   totalDebts: string;
+  monthlyExpenses: string;
+  monthlyDebtRepayment: string;
+  monthlySavings: string;
   hasExistingInsurance: string;
+  existingCoverageAmount: string;
   existingInsuranceDetails: string;
   noInsuranceReason: string;
   acceptableBudget: string;
@@ -57,6 +61,7 @@ type ReviewState = {
   advisor_email: string;
   signed_date: string;
   replacement_years: string;
+  education_fund: string;
   final_recommended_coverage: string;
   recommendation_1_budget: string;
   recommendation_2_budget: string;
@@ -74,7 +79,7 @@ type AdminUser = User & { organization: Organization };
 const AUTH_KEY = 'finab_abf_session';
 
 const emptyForm: FormState = {
-  legalLastName: '', firstNames: '', dateOfBirth: '', sex: '', placeOfBirth: '', residencyStatus: '', maritalStatus: '', dependents: '', arrivalInCanada: '', insuredIsOwner: 'oui', ownerName: '', ownerRelationship: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerName: '', employerAddress: '', incomeType: 'annuel', annualIncome: '', hourlyRate: '', totalAssets: '', totalDebts: '', hasExistingInsurance: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', shortTermGoals: '', mediumTermGoals: '', longTermGoals: '', currentFinancialSituation: '', familyNeedIfDeath: '', priorityProjects: '',
+  legalLastName: '', firstNames: '', dateOfBirth: '', sex: '', placeOfBirth: '', residencyStatus: '', maritalStatus: '', dependents: '', arrivalInCanada: '', insuredIsOwner: 'oui', ownerName: '', ownerRelationship: '', phone: '', email: '', address: '', postalCode: '', occupation: '', employerName: '', employerAddress: '', incomeType: 'annuel', annualIncome: '', hourlyRate: '', totalAssets: '', totalDebts: '', monthlyExpenses: '', monthlyDebtRepayment: '', monthlySavings: '', hasExistingInsurance: '', existingCoverageAmount: '', existingInsuranceDetails: '', noInsuranceReason: '', acceptableBudget: '', height: '', weight: '', availability: '', shortTermGoals: '', mediumTermGoals: '', longTermGoals: '', currentFinancialSituation: '', familyNeedIfDeath: '', priorityProjects: '',
 };
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const emptyReview: ReviewState = {
@@ -83,7 +88,8 @@ const emptyReview: ReviewState = {
   advisor_phone: '',
   advisor_email: '',
   signed_date: todayIso(),
-  replacement_years: '10',
+  replacement_years: '0',
+  education_fund: '',
   final_recommended_coverage: '',
   recommendation_1_budget: '',
   recommendation_2_budget: '',
@@ -124,8 +130,8 @@ function payloadFromForm(form: FormState) {
     contact: { phone: form.phone, email: form.email, address: parsedAddress.address, city: parsedAddress.city, province: parsedAddress.province, postal_code: form.postalCode },
     owner: { insured_is_owner: form.insuredIsOwner !== 'non', name: form.ownerName, relationship: form.ownerRelationship, email: '', phone: '' },
     employment: { occupation: form.occupation, employer_name: form.employerName, employer_address: form.employerAddress, income_type: form.incomeType === 'horaire' ? 'horaire' : 'annuel', annual_income: numberValue(form.annualIncome), hourly_rate: numberValue(form.hourlyRate), monthly_net_income: 0 },
-    financial: { total_assets: numberValue(form.totalAssets), cash_savings: 0, personal_property: numberValue(form.totalAssets), total_debts: numberValue(form.totalDebts), credit_cards: 0, car_loan: 0, student_loan: 0, personal_loan: 0, mortgage: 0, monthly_expenses: 0, monthly_debt_repayment: 0, monthly_savings: 0 },
-    insurance: { has_existing_life_insurance: hasInsurance, existing_life_coverage: 0, existing_monthly_premium: 0, existing_retirement_savings_note: form.existingInsuranceDetails, no_insurance_reason: form.noInsuranceReason },
+    financial: { total_assets: numberValue(form.totalAssets), cash_savings: 0, personal_property: numberValue(form.totalAssets), total_debts: numberValue(form.totalDebts), credit_cards: 0, car_loan: 0, student_loan: 0, personal_loan: 0, mortgage: 0, monthly_expenses: numberValue(form.monthlyExpenses), monthly_debt_repayment: numberValue(form.monthlyDebtRepayment), monthly_savings: numberValue(form.monthlySavings) },
+    insurance: { has_existing_life_insurance: hasInsurance, existing_life_coverage: hasInsurance ? numberValue(form.existingCoverageAmount) : 0, existing_monthly_premium: 0, existing_retirement_savings_note: form.existingInsuranceDetails, no_insurance_reason: form.noInsuranceReason },
     goals: { short_term_goals: form.shortTermGoals, medium_term_goals: form.mediumTermGoals, long_term_goals: form.longTermGoals, current_financial_situation: form.currentFinancialSituation, family_need_if_death: form.familyNeedIfDeath, additional_info: form.priorityProjects, priority_projects: form.priorityProjects, acceptable_monthly_budget: numberValue(form.acceptableBudget), client_preference: form.acceptableBudget },
     health: { height: form.height, weight: form.weight, smoker: null, health_notes: '' },
     meeting: { availability: form.availability, preferred_mode: '', consent_acknowledged: true },
@@ -161,7 +167,11 @@ function formFromPayload(payload: any): FormState {
     hourlyRate: String(payload?.employment?.hourly_rate || ''),
     totalAssets: String(payload?.financial?.total_assets || ''),
     totalDebts: String(payload?.financial?.total_debts || ''),
+    monthlyExpenses: String(payload?.financial?.monthly_expenses || ''),
+    monthlyDebtRepayment: String(payload?.financial?.monthly_debt_repayment || ''),
+    monthlySavings: String(payload?.financial?.monthly_savings || ''),
     hasExistingInsurance: payload?.insurance?.has_existing_life_insurance ? 'oui' : 'non',
+    existingCoverageAmount: String(payload?.insurance?.existing_life_coverage || ''),
     existingInsuranceDetails: payload?.insurance?.existing_retirement_savings_note || '',
     noInsuranceReason: payload?.insurance?.no_insurance_reason || '',
     acceptableBudget: String(payload?.goals?.acceptable_monthly_budget || ''),
@@ -188,7 +198,8 @@ function reviewFromDetail(detail: ProspectDetail | null, session?: AuthSession |
     advisor_phone: review.advisor_phone || org.advisor_phone || '',
     advisor_email: review.advisor_email || org.advisor_email || session?.user.email || '',
     signed_date: review.signed_date || todayIso(),
-    replacement_years: String(review.replacement_years ?? 10),
+    replacement_years: String(review.replacement_years ?? 0),
+    education_fund: String(review.education_fund || ''),
     final_recommended_coverage: String(review.final_recommended_coverage || ''),
     recommendation_1_budget: String(review.recommendation_1_budget || budget || ''),
     recommendation_2_budget: String(review.recommendation_2_budget || (Number(budget) ? Number(budget) * 1.5 : '') || ''),
@@ -208,6 +219,7 @@ function reviewPayload(form: ReviewState) {
     advisor_email: form.advisor_email,
     signed_date: form.signed_date || todayIso(),
     replacement_years: numberValue(form.replacement_years),
+    education_fund: numberValue(form.education_fund),
     final_recommended_coverage: numberValue(form.final_recommended_coverage),
     recommendation_1_budget: numberValue(form.recommendation_1_budget),
     recommendation_2_budget: numberValue(form.recommendation_2_budget),
@@ -217,6 +229,102 @@ function reviewPayload(form: ReviewState) {
     preference_notes: form.preference_notes,
     agent_notes: form.agent_notes,
   };
+}
+
+// --- Live ABF calculation (JS mirror of backend calculations.py) ---
+function ageFromIso(iso: string): number | null {
+  if (!iso) return null;
+  const dob = new Date(iso);
+  if (Number.isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let years = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) years -= 1;
+  return Math.max(0, years);
+}
+function suggestedYears(age: number | null): number {
+  if (age === null) return 20;
+  if (age < 30) return 30;
+  if (age < 50) return 20;
+  return 15;
+}
+function computeAbfPreview(form: FormState, review: ReviewState) {
+  const annual = form.incomeType === 'horaire' ? numberValue(form.hourlyRate) * 40 * 52 : numberValue(form.annualIncome);
+  const age = ageFromIso(form.dateOfBirth);
+  const requestedYears = numberValue(review.replacement_years);
+  const years = requestedYears > 0 ? requestedYears : suggestedYears(age);
+  const debts = numberValue(form.totalDebts);
+  // Fonds d'éducation : jamais automatique — forfait saisi par le conseiller
+  // (repère : 20 000 $ x 4 ans x nombre d'enfants). Il augmente le besoin total.
+  const education = numberValue(review.education_fund);
+  const existing = form.hasExistingInsurance === 'oui' ? numberValue(form.existingCoverageAmount) : 0;
+  const incomeReplacement = annual * years;
+  const totalNeed = Math.max(0, debts + incomeReplacement + education - existing);
+  const monthlyNet = Math.round(annual / 12);
+  const surplus = Math.max(0, monthlyNet - numberValue(form.monthlyExpenses) - numberValue(form.monthlyDebtRepayment) - numberValue(form.monthlySavings));
+  const half = Math.round(totalNeed / 2);
+  return { annual, age, years, debts, education, existing, incomeReplacement, totalNeed, monthlyNet, surplus, half };
+}
+
+// --- Live recalculation inside the integrated PDF editor -------------------
+// The exported PDF embeds the same formulas as AcroForm JavaScript (run by
+// Adobe); the browser overlay does not execute PDF JavaScript, so these
+// mirrors keep the totals moving while the advisor edits fields on screen.
+const parsePdfMoney = (raw: string | undefined) => {
+  let s = String(raw ?? '').replace(/[^0-9.,-]/g, '');
+  if (s.includes('.') && s.includes(',')) s = s.replace(/,/g, '');
+  else if (s.includes(',')) s = /,\d{1,2}$/.test(s) ? s.replace(',', '.') : s.replace(/,/g, '');
+  const v = parseFloat(s);
+  return Number.isNaN(v) ? 0 : v;
+};
+const pdfMoney = (v: number) => `C$ ${v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pdfCompactMoney = (v: number) => v === 0 ? '$ 0' : `$ ${Math.round(v).toLocaleString('en-CA')}`;
+const PDF_CALC_TRIGGERS = new Set(['Creditcards', 'LinesofCredits', 'CarLoan', 'Student Loan', 'PersonalLoan', 'OtherDebts', 'Funeral Expense', 'DebtsFuneral', 'AnnualIncome', 'Yearsofincome', 'IncometobeReplaced', 'Mortgage', 'EducationFund', 'ChildCare', 'EducationandChildcare', 'CurrentLife', 'TotalFNA', 'MonthlyNetIncome', 'Expenses', 'DebtRepayment', 'Savings']);
+
+function recomputePdfCalculations(values: Record<string, string>, changed: string): Record<string, string> {
+  if (!PDF_CALC_TRIGGERS.has(changed)) return values;
+  const next = { ...values };
+  const num = (name: string) => parsePdfMoney(next[name]);
+  const has = (name: string) => String(next[name] ?? '').trim() !== '';
+  // Never overwrite the field the advisor is typing into right now.
+  const put = (name: string, value: string) => { if (name in next && name !== changed) next[name] = value; };
+  put('DebtsFuneral', pdfMoney(num('Creditcards') + num('LinesofCredits') + num('CarLoan') + num('Student Loan') + num('PersonalLoan') + num('OtherDebts') + num('Funeral Expense')));
+  put('IncometobeReplaced', pdfMoney(num('AnnualIncome') * num('Yearsofincome')));
+  if (has('EducationFund') || has('ChildCare')) put('EducationandChildcare', pdfMoney(num('EducationFund') + num('ChildCare')));
+  const total = Math.max(0, num('DebtsFuneral') + num('IncometobeReplaced') + num('Mortgage') + num('EducationandChildcare') - num('CurrentLife'));
+  put('TotalFNA', pdfMoney(total));
+  const annual = num('AnnualIncome');
+  if (annual > 0) put('MonthlyNetIncome', pdfMoney(annual / 12));
+  put('Surplus', pdfMoney(Math.max(0, num('MonthlyNetIncome') - num('Expenses') - num('DebtRepayment') - num('Savings'))));
+  // Recommendation columns 1 & 2 always mirror the full need; the existing
+  // coverage follows on all three. The client-preference totals and the
+  // universal/term split stay manual — those are the advisor's choices.
+  // Read the effective total back so a hand-typed TotalFNA also propagates.
+  const compactTotal = pdfCompactMoney(num('TotalFNA'));
+  for (const name of ['TotalFNA0', 'TotalFNA1', 'Text Field16', 'Text Field22']) put(name, compactTotal);
+  const compactExisting = pdfCompactMoney(num('CurrentLife'));
+  for (const name of ['CurrentLife0', 'CurrentLife1', 'CurrentLife2']) put(name, compactExisting);
+  return next;
+}
+
+function AbfCalculationSummary({ form, review }: { form: FormState; review: ReviewState }) {
+  const c = useMemo(() => computeAbfPreview(form, review), [form, review]);
+  return <section className="advisor-card abf-live-summary">
+    <div className="edit-prospect-head"><div><p className="eyebrow">Calcul automatique</p><h2>Aperçu du besoin financier (mis à jour en direct)</h2><p className="muted">Ces montants se recalculent automatiquement dès que vous modifiez le formulaire client ou la préparation ABF ci-dessous.</p></div></div>
+    <div className="abf-summary-grid">
+      <div><span>Revenu annuel net</span><strong>{money(c.annual)} $</strong></div>
+      <div><span>Années de remplacement</span><strong>{c.years} ans{c.age !== null ? ` · client ${c.age} ans` : ''}</strong></div>
+      <div><span>Remplacement de revenu</span><strong>{money(c.incomeReplacement)} $</strong></div>
+      <div><span>Dettes & frais funéraires</span><strong>{money(c.debts)} $</strong></div>
+      <div><span>Éducation / garde d'enfants</span><strong>{money(c.education)} $</strong></div>
+      <div><span>Couverture existante (−)</span><strong>{money(c.existing)} $</strong></div>
+      <div className="abf-summary-total"><span>Besoin total d'assurance</span><strong>{money(c.totalNeed)} $</strong></div>
+      <div><span>Revenu net mensuel</span><strong>{money(c.monthlyNet)} $</strong></div>
+      <div><span>Surplus mensuel</span><strong>{money(c.surplus)} $</strong></div>
+      <div><span>½ Vie universelle</span><strong>{money(c.half)} $</strong></div>
+      <div><span>½ Temporaire</span><strong>{money(c.half)} $</strong></div>
+    </div>
+  </section>;
 }
 
 function PublicForm() {
@@ -285,9 +393,13 @@ function PublicForm() {
         <div className="form-section"><h2>Situation financière</h2><div className="form-grid">
           <label className="span-2">Valeur totale approximative de vos biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" placeholder="Auto, épargne, biens personnels…" /></label>
           <label className="span-2">Total approximatif de vos dettes<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" placeholder="Cartes, marges, auto, prêts…" /></label>
+          <label>Dépenses mensuelles<input value={form.monthlyExpenses} onChange={set('monthlyExpenses')} inputMode="decimal" placeholder="Ex: 2 500 $ / mois" /></label>
+          <label>Remboursement de dette mensuel<input value={form.monthlyDebtRepayment} onChange={set('monthlyDebtRepayment')} inputMode="decimal" placeholder="Ex: 500 $ / mois" /></label>
+          <label>Épargnes mensuelles<input value={form.monthlySavings} onChange={set('monthlySavings')} inputMode="decimal" placeholder="Ex: 300 $ / mois" /></label>
         </div></div>
         <div className="form-section"><h2>Assurance et budget</h2><div className="form-grid">
           <label>Possédez-vous déjà une assurance vie individuelle ?<select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
+          {form.hasExistingInsurance === 'oui' && <label>Capital assuré actuel (couverture existante)<input value={form.existingCoverageAmount} onChange={set('existingCoverageAmount')} inputMode="decimal" placeholder="Ex: 100 000 $ — vient réduire le besoin total" /></label>}
           <label className="span-2">Détails de vos protections et cotisations actuelles<textarea value={form.existingInsuranceDetails} onChange={set('existingInsuranceDetails')} placeholder="Capital assuré, prime mensuelle, REER, CELI, REEE…" /></label>
           <label className="span-2">Si vous n’avez pas d’assurance, quelle en est la raison ?<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
           <label className="span-2">Budget mensuel confortable pour vos protections et votre épargne<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" placeholder="Ex: 150 $ / mois" /></label>
@@ -457,7 +569,10 @@ function AdvisorDashboard() {
     setPdfOriginals(merged);
   }
   function setPdfFieldValue(name: string, value: string) {
-    setPdfValues((current) => ({ ...current, [name]: value }));
+    // Recompute the dependent totals (revenus à remplacer, besoin total,
+    // surplus, colonnes de recommandation) exactly like the JavaScript
+    // embedded in the exported PDF does inside Adobe.
+    setPdfValues((current) => recomputePdfCalculations({ ...current, [name]: value }, name));
   }
   function resetPdfFields() { setPdfValues(pdfOriginals); }
   function pdfFieldDiff(): Record<string, string> {
@@ -630,6 +745,7 @@ function AdvisorDashboard() {
           {editing
             ? <EditableProspectForm form={editForm} setForm={setEditForm} loading={loading} onSave={saveProspectEdits} onCancel={() => { setEditForm(formFromPayload(selected.payload)); setEditing(false); }} />
             : <section className="advisor-card edit-prospect-card"><div className="edit-prospect-head"><div><h2>Formulaire client modifiable</h2><p className="muted">Les informations reçues restent corrigibles dans l’espace conseiller. Cliquez sur « Modifier le formulaire » pour ajuster le dossier avant l’export.</p></div><div className="edit-actions"><button className="submit-button compact" type="button" onClick={startEditing}><Pencil size={16}/> Modifier le formulaire</button></div></div><div className="form-grid edit-form-grid"><label>Nom complet<input value={`${safe(p.identity?.legal_last_name)} ${safe(p.identity?.first_names)}`} readOnly /></label><label>Téléphone<input value={safe(p.contact?.phone)} readOnly /></label><label>Courriel<input value={safe(p.contact?.email)} readOnly /></label><label>Budget mensuel<input value={safe(p.goals?.acceptable_monthly_budget)} readOnly /></label></div></section>}
+          <AbfCalculationSummary form={editForm} review={reviewForm} />
           <AdvisorReviewForm form={reviewForm} setForm={setReviewForm} loading={loading} onSave={saveAdvisorReview} />
           <PdfFormEditor previewUrl={pdfPreviewUrl} pdfPath={latestPdfPath} token={token || ''} loading={loading} values={pdfValues} originals={pdfOriginals} onFieldsLoaded={handlePdfFieldsLoaded} onFieldChange={setPdfFieldValue} onReset={resetPdfFields} onSave={savePdfFields} onGenerate={generateAbf} onDownload={() => downloadPdf(latestPdfPath)} />
           <section className="advisor-card"><h2>Documents ABF générés</h2>{(!selected.documents || selected.documents.length === 0) && <p className="muted">Aucun document généré pour ce prospect.</p>}{selected.documents?.map((doc, idx) => <button className="doc-row" key={idx} onClick={() => downloadPdf(doc.output_path || '')}><FileText size={18}/> Télécharger l’ABF généré {doc.created_at ? new Date(doc.created_at).toLocaleString('fr-CA') : ''}</button>)}</section>
@@ -840,7 +956,8 @@ function AdvisorReviewForm({ form, setForm, loading, onSave }: { form: ReviewSta
       <label>Téléphone conseiller<input value={form.advisor_phone} onChange={set('advisor_phone')} /></label>
       <label>Courriel conseiller<input value={form.advisor_email} onChange={set('advisor_email')} /></label>
       <label>Date de signature / validation<input type="date" value={form.signed_date} onChange={set('signed_date')} /></label>
-      <label>Années de remplacement de revenu<input value={form.replacement_years} onChange={set('replacement_years')} inputMode="numeric" /></label>
+      <label>Années de remplacement de revenu<input value={form.replacement_years} onChange={set('replacement_years')} inputMode="numeric" placeholder="0 = automatique selon l'âge (‹30 → 30, 30-49 → 20, 50+ → 15)" /></label>
+      <label>Fonds d'éducation et garde d'enfants<input value={form.education_fund} onChange={set('education_fund')} inputMode="decimal" placeholder="Repère : 20 000 $ × 4 ans × nombre d'enfants — augmente le besoin total" /></label>
       <label>Couverture finale recommandée<input value={form.final_recommended_coverage} onChange={set('final_recommended_coverage')} inputMode="decimal" placeholder="Laisser vide pour utiliser le calcul automatique" /></label>
       <label>Budget recommandation 1<input value={form.recommendation_1_budget} onChange={set('recommendation_1_budget')} inputMode="decimal" /></label>
       <label>Budget recommandation 2<input value={form.recommendation_2_budget} onChange={set('recommendation_2_budget')} inputMode="decimal" /></label>
@@ -885,7 +1002,11 @@ function EditableProspectForm({ form, setForm, loading, onSave, onCancel }: { fo
         : <label>Revenu annuel<input value={form.annualIncome} onChange={set('annualIncome')} inputMode="decimal" /></label>}
       <label>Total des biens<input value={form.totalAssets} onChange={set('totalAssets')} inputMode="decimal" /></label>
       <label>Total des dettes<input value={form.totalDebts} onChange={set('totalDebts')} inputMode="decimal" /></label>
+      <label>Dépenses mensuelles<input value={form.monthlyExpenses} onChange={set('monthlyExpenses')} inputMode="decimal" /></label>
+      <label>Remboursement dette mensuel<input value={form.monthlyDebtRepayment} onChange={set('monthlyDebtRepayment')} inputMode="decimal" /></label>
+      <label>Épargnes mensuelles<input value={form.monthlySavings} onChange={set('monthlySavings')} inputMode="decimal" /></label>
       <label>Assurance vie existante<select value={form.hasExistingInsurance} onChange={set('hasExistingInsurance')}><option value="">Sélectionner</option><option value="oui">Oui</option><option value="non">Non</option></select></label>
+      {form.hasExistingInsurance === 'oui' && <label>Capital assuré actuel (réduit le besoin)<input value={form.existingCoverageAmount} onChange={set('existingCoverageAmount')} inputMode="decimal" /></label>}
       <label className="span-2">Détails assurance / placements<textarea value={form.existingInsuranceDetails} onChange={set('existingInsuranceDetails')} /></label>
       <label className="span-2">Si non : raison<textarea value={form.noInsuranceReason} onChange={set('noInsuranceReason')} /></label>
       <label>Budget mensuel confortable<input value={form.acceptableBudget} onChange={set('acceptableBudget')} inputMode="decimal" /></label>

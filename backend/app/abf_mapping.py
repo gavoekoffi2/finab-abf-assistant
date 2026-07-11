@@ -36,7 +36,7 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
     e = prospect.employment
     g = prospect.goals
     o = prospect.owner
-    fna = estimate_financial_need(prospect, review.replacement_years)
+    fna = estimate_financial_need(prospect, review.replacement_years, review.education_fund)
     worth = net_worth(prospect)
     rec1, rec2, pref = draft_recommendations(prospect, fna, review)
     signed_date = review.signed_date.isoformat()
@@ -49,6 +49,16 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
     pref_cov = review.final_recommended_coverage or full_need
     existing = fna["current_life"]
     monthly_net = e.monthly_net_income or round(fna["annual_income"] / 12, 2)
+
+    # Client budget block (page 7). The monthly surplus is always shown and is
+    # simply: revenu net mensuel - dépenses - remboursement de dette - épargnes.
+    # When the client declared none of those the surplus equals the net income
+    # (e.g. 12 500 $ - 0 - 0 - 0 = 12 500 $), per the advisor's workflow.
+    fin = prospect.financial
+    monthly_surplus = max(
+        0.0,
+        monthly_net - fin.monthly_expenses - fin.monthly_debt_repayment - fin.monthly_savings,
+    )
 
     # Cover page: leave the 'Propriétaire' line blank when the insured is also
     # the owner; otherwise name the paying client.
@@ -122,7 +132,9 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
         "AnnualIncome": money(fna["annual_income"]),
         "Yearsofincome": str(int(fna["replacement_years"])),
         "Mortgage": money(prospect.financial.mortgage),
-        "EducationandChildcare": money(fna["education_childcare"]),
+        # Jamais pré-rempli automatiquement : le conseiller saisit son forfait
+        # (dans l'app ou directement dans Adobe) et le total se recalcule.
+        "EducationandChildcare": money(fna["education_childcare"]) if fna["education_childcare"] else "",
         "CurrentLife": money(existing),
         "TotalFNA": money(full_need),
         # Assets/passifs page. A lone asset lands in 'Autres Biens' (AS10).
@@ -138,10 +150,10 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
         # Product suitability page — client budget. Monthly net income defaults
         # to the annual figure / 12 when the client did not give a monthly one.
         "MonthlyNetIncome": money(monthly_net),
-        "Expenses": money(prospect.financial.monthly_expenses) if prospect.financial.monthly_expenses else "",
-        "DebtRepayment": money(prospect.financial.monthly_debt_repayment) if prospect.financial.monthly_debt_repayment else "",
-        "Savings": money(prospect.financial.monthly_savings) if prospect.financial.monthly_savings else "",
-        "Surplus": money(max(0, monthly_net - prospect.financial.monthly_expenses - prospect.financial.monthly_debt_repayment)) if prospect.financial.monthly_expenses else "",
+        "Expenses": money(fin.monthly_expenses) if fin.monthly_expenses else "",
+        "DebtRepayment": money(fin.monthly_debt_repayment) if fin.monthly_debt_repayment else "",
+        "Savings": money(fin.monthly_savings) if fin.monthly_savings else "",
+        "Surplus": money(monthly_surplus),
         "Budget.0": money(review.recommendation_1_budget or prospect.goals.acceptable_monthly_budget),
         "Budget.1": money(review.recommendation_2_budget or prospect.goals.acceptable_monthly_budget),
         "Budget.2": money(review.client_preference_budget or prospect.goals.acceptable_monthly_budget),
