@@ -85,17 +85,27 @@ _CALC_SCRIPTS: dict[str, str] = {
         "event.value=CMON(Math.max(0,FNUM('MonthlyNetIncome')-FNUM('Expenses')"
         "-FNUM('DebtRepayment')-FNUM('Savings')));"
     ),
-    # Les colonnes recommandation 1 & 2 illustrent toujours le besoin complet
-    # et la couverture existante suit sur les trois colonnes. La colonne
-    # 'préférence client' et la répartition universelle/temporaire restent
-    # libres : ce sont des choix du conseiller.
+    # 'Total des besoins d'assurance' vient de l'analyse et est identique sur
+    # les trois colonnes ; la couverture existante suit aussi partout. La
+    # répartition universelle/temporaire reste libre : choix du conseiller.
     "TotalFNA0": "event.value=SMON(FNUM('TotalFNA'));",
     "TotalFNA1": "event.value=SMON(FNUM('TotalFNA'));",
-    "Text Field16": "event.value=SMON(FNUM('TotalFNA'));",
-    "Text Field22": "event.value=SMON(FNUM('TotalFNA'));",
+    "TotalFNA2": "event.value=SMON(FNUM('TotalFNA'));",
     "CurrentLife0": "event.value=SMON(FNUM('CurrentLife'));",
     "CurrentLife1": "event.value=SMON(FNUM('CurrentLife'));",
     "CurrentLife2": "event.value=SMON(FNUM('CurrentLife'));",
+    # Prestation de décès totale par colonne = montant nominal + avenant 1
+    # + avenant 2. La maladie grave (avenant MG) n'entre jamais dedans.
+    "Text Field16": "event.value=SMON(FNUM('FaceAmount')+FNUM('Text Field15')+FNUM('Text Field18'));",
+    "Text Field22": "event.value=SMON(FNUM('FaceAmount0')+FNUM('Text Field21')+FNUM('Text Field24'));",
+    "Text Field28": "event.value=SMON(FNUM('FaceAmount1')+FNUM('Text Field27')+FNUM('Text Field30'));",
+    # Page 'Actifs et Passifs' : total des actifs = somme des lignes AS1..AS10,
+    # reporté dans l'encadré 'Valeur nette' (AS12) ; passif total = dettes de
+    # l'analyse + hypothèque ; valeur nette = actifs - passifs.
+    "AS11": "event.value=CMON(" + "+".join(f"FNUM('AS{n}')" for n in range(1, 11)) + ");",
+    "AS12": "event.value=CMON(FNUM('AS11'));",
+    "AS14": "event.value=CMON(FNUM('DebtsFuneral')+FNUM('Mortgage'));",
+    "AS15": "event.value=CMON(FNUM('AS11')-FNUM('AS14'));",
 }
 
 # Dependencies first, grand totals next, mirrored columns last.
@@ -108,11 +118,17 @@ _CALC_ORDER = (
     "Surplus",
     "TotalFNA0",
     "TotalFNA1",
-    "Text Field16",
-    "Text Field22",
+    "TotalFNA2",
     "CurrentLife0",
     "CurrentLife1",
     "CurrentLife2",
+    "Text Field16",
+    "Text Field22",
+    "Text Field28",
+    "AS11",
+    "AS14",
+    "AS12",
+    "AS15",
 )
 
 

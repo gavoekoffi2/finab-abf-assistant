@@ -205,11 +205,21 @@ def test_generated_pdf_embeds_auto_calculation(tmp_path) -> None:
                     scripted[widget.field_name] = doc.xref_stream(int(ref.split()[0])).decode()
                 elif kind == "string":
                     scripted[widget.field_name] = ref
-        for name in ("DebtsFuneral", "IncometobeReplaced", "EducationandChildcare", "TotalFNA", "MonthlyNetIncome", "Surplus", "TotalFNA0", "CurrentLife0"):
+        for name in (
+            "DebtsFuneral", "IncometobeReplaced", "EducationandChildcare", "TotalFNA",
+            "MonthlyNetIncome", "Surplus", "TotalFNA0", "TotalFNA2", "CurrentLife0",
+            "Text Field16", "Text Field22", "Text Field28", "AS11", "AS12", "AS14", "AS15",
+        ):
             assert name in scripted, f"{name} lacks a calculation script"
         assert "FNUM('AnnualIncome')*FNUM('Yearsofincome')" in scripted["IncometobeReplaced"]
         assert "-FNUM('CurrentLife')" in scripted["TotalFNA"]
         assert "-FNUM('Savings')" in scripted["Surplus"]
+        # Prestation totale = nominal + avenant 1 + avenant 2, sans la MG.
+        assert "FNUM('FaceAmount')+FNUM('Text Field15')+FNUM('Text Field18')" in scripted["Text Field16"]
+        assert "Text Field19" not in scripted["Text Field16"]
+        # Actifs : somme AS1..AS10 ; valeur nette = actifs - passifs.
+        assert "FNUM('AS1')" in scripted["AS11"] and "FNUM('AS10')" in scripted["AS11"]
+        assert "FNUM('AS11')-FNUM('AS14')" in scripted["AS15"]
         # Calculation order so intermediate totals resolve before the totals.
         catalog = doc.pdf_catalog()
         kind, value = doc.xref_get_key(catalog, "AcroForm")
