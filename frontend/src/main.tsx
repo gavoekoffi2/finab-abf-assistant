@@ -279,7 +279,15 @@ const parsePdfMoney = (raw: string | undefined) => {
 };
 const pdfMoney = (v: number) => `C$ ${v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pdfCompactMoney = (v: number) => v === 0 ? '$ 0' : `$ ${Math.round(v).toLocaleString('en-CA')}`;
-const PDF_CALC_TRIGGERS = new Set(['Creditcards', 'LinesofCredits', 'CarLoan', 'Student Loan', 'PersonalLoan', 'OtherDebts', 'Funeral Expense', 'DebtsFuneral', 'AnnualIncome', 'Yearsofincome', 'IncometobeReplaced', 'Mortgage', 'EducationFund', 'ChildCare', 'EducationandChildcare', 'CurrentLife', 'TotalFNA', 'MonthlyNetIncome', 'Expenses', 'DebtRepayment', 'Savings']);
+const PDF_CALC_TRIGGERS = new Set([
+  'Creditcards', 'LinesofCredits', 'CarLoan', 'Student Loan', 'PersonalLoan', 'OtherDebts', 'Funeral Expense', 'DebtsFuneral',
+  'AnnualIncome', 'Yearsofincome', 'IncometobeReplaced', 'Mortgage', 'EducationFund', 'ChildCare', 'EducationandChildcare', 'CurrentLife', 'TotalFNA',
+  'MonthlyNetIncome', 'Expenses', 'DebtRepayment', 'Savings',
+  // Colonnes produits : nominal + avenants 1/2 -> prestation de décès totale.
+  'FaceAmount', 'FaceAmount0', 'FaceAmount1', 'Text Field15', 'Text Field18', 'Text Field21', 'Text Field24', 'Text Field27', 'Text Field30',
+  // Page actifs et passifs.
+  'AS1', 'AS2', 'AS3', 'AS4', 'AS5', 'AS6', 'AS7', 'AS8', 'AS9', 'AS10', 'AS11', 'AS14',
+]);
 
 function recomputePdfCalculations(values: Record<string, string>, changed: string): Record<string, string> {
   if (!PDF_CALC_TRIGGERS.has(changed)) return values;
@@ -296,14 +304,25 @@ function recomputePdfCalculations(values: Record<string, string>, changed: strin
   const annual = num('AnnualIncome');
   if (annual > 0) put('MonthlyNetIncome', pdfMoney(annual / 12));
   put('Surplus', pdfMoney(Math.max(0, num('MonthlyNetIncome') - num('Expenses') - num('DebtRepayment') - num('Savings'))));
-  // Recommendation columns 1 & 2 always mirror the full need; the existing
-  // coverage follows on all three. The client-preference totals and the
-  // universal/term split stay manual — those are the advisor's choices.
+  // 'Total des besoins d'assurance' vient de l'analyse et est identique sur
+  // les trois colonnes ; la couverture existante suit aussi partout.
   // Read the effective total back so a hand-typed TotalFNA also propagates.
   const compactTotal = pdfCompactMoney(num('TotalFNA'));
-  for (const name of ['TotalFNA0', 'TotalFNA1', 'Text Field16', 'Text Field22']) put(name, compactTotal);
+  for (const name of ['TotalFNA0', 'TotalFNA1', 'TotalFNA2']) put(name, compactTotal);
   const compactExisting = pdfCompactMoney(num('CurrentLife'));
   for (const name of ['CurrentLife0', 'CurrentLife1', 'CurrentLife2']) put(name, compactExisting);
+  // Prestation de décès totale par colonne = nominal + avenant 1 + avenant 2
+  // (la maladie grave n'entre jamais dedans).
+  put('Text Field16', pdfCompactMoney(num('FaceAmount') + num('Text Field15') + num('Text Field18')));
+  put('Text Field22', pdfCompactMoney(num('FaceAmount0') + num('Text Field21') + num('Text Field24')));
+  put('Text Field28', pdfCompactMoney(num('FaceAmount1') + num('Text Field27') + num('Text Field30')));
+  // Page 'Actifs et Passifs' : total actifs = somme AS1..AS10, reporté dans
+  // l'encadré valeur nette ; passif = dettes de l'analyse + hypothèque ;
+  // valeur nette = actifs - passifs.
+  put('AS11', pdfMoney(['AS1', 'AS2', 'AS3', 'AS4', 'AS5', 'AS6', 'AS7', 'AS8', 'AS9', 'AS10'].reduce((sum, name) => sum + num(name), 0)));
+  put('AS12', pdfMoney(num('AS11')));
+  put('AS14', pdfMoney(num('DebtsFuneral') + num('Mortgage')));
+  put('AS15', pdfMoney(num('AS11') - num('AS14')));
   return next;
 }
 

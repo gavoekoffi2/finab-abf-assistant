@@ -193,10 +193,12 @@ def build_abf_values(prospect: ProspectSubmission, review: AdvisorReview) -> dic
         "CurrentLife1": compact_money(existing),
         "CurrentLife0": compact_money(existing),
         "CurrentLife2": compact_money(existing),
-        # Total des besoins d'assurance per column.
+        # Total des besoins d'assurance : le besoin vient de l'analyse (page 5)
+        # et il est identique sur les trois colonnes — ce qui varie entre les
+        # colonnes, c'est la prestation proposée, pas le besoin à couvrir.
         "TotalFNA0": compact_money(full_need),
         "TotalFNA1": compact_money(full_need),
-        "TotalFNA2": compact_money(pref_cov),
+        "TotalFNA2": compact_money(full_need),
         "Rationale1": review.recommendation_1_notes or rec1,
         "Rationale2": review.recommendation_2_notes or rec2,
         "Rationale3": review.preference_notes or pref,

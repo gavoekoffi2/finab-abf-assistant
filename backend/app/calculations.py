@@ -95,5 +95,15 @@ def net_worth(prospect: ProspectSubmission) -> dict[str, float]:
     assets = prospect.financial.total_assets or (
         prospect.financial.cash_savings + prospect.financial.personal_property
     )
-    debts = prospect.financial.total_debts
+    # 'Passif total (tiré de l'analyse des besoins financiers)' : same debts as
+    # the FNA page (dettes et frais funéraires) plus the mortgage line.
+    debts = (
+        prospect.financial.total_debts
+        or (
+            prospect.financial.credit_cards
+            + prospect.financial.car_loan
+            + prospect.financial.student_loan
+            + prospect.financial.personal_loan
+        )
+    ) + prospect.financial.mortgage
     return {"assets": assets, "debts": debts, "net_worth": assets - debts}
